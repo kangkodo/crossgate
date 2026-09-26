@@ -1,5 +1,8 @@
 # 변경 이력
 
+## 0.1.1 (2026-09-26)
+- AGENTS/CLAUDE 안내 단락: 기존 작업 절차와 겹칠 때 `/pipeline`으로 시작한 작업만 파이프라인 절차를 따른다고 명시
+
 ## 0.1.0 (2026-09-26)
 - 최초 버전. 명세 `ai-crossreview-pipeline-spec` v1.5 기준.
 - `bin/pipeline`: init-run, codex, gate, verdict, status, merge-check, deploy, clean-raw
