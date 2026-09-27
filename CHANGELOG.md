@@ -1,5 +1,13 @@
 # 변경 이력
 
+## 0.2.0 (2026-09-27) — 이름을 Crossgate로
+이 시스템의 이름을 **Crossgate**(교차 검수 + 단계마다 관문)로 정했다. 옛 이름 `ai-pipeline-kit`과 일반적인 명령어 이름 `pipeline`이 다른 도구와 겹칠 위험을 없앤다.
+- 명령 `pipeline` → `crossgate`, 스킬 `/pipeline` → `/crossgate`, 검수 에이전트 `pipeline-reviewer` → `crossgate-reviewer`
+- 프로젝트 폴더 `.pipeline/` → `.crossgate/`, 규칙 문서 `PIPELINE.md` → `CROSSGATE.md`, CI 템플릿 `crossgate.yml`
+- `install.sh`가 0.1.x 프로젝트를 자동 이전: 설정(보호 경로 포함)·현재 실행 보존, 옛 킷·스킬·에이전트·안내 단락 제거, `.gitignore`와 CI 워크플로의 경로 갱신
+- 새 설치기는 새 구조의 태그(0.2.0 이상)만 설치한다. 0.1.x가 필요하면 그 태그의 `install.sh`를 쓴다
+- 동작 규칙은 0.1.3과 같다
+
 ## 0.1.3 (2026-09-27)
 파일럿 2회차(기존 프로젝트, 지도 표현 개선)와 원본·프로젝트 분리 점검에서 나온 수정.
 - 설치: 기본으로 최신 태그에서 설치(`--ref`로 지정, `--dev`는 작업 트리). 설치된 복사본을 `MANIFEST.sha256`으로 봉인하고 `gate`·`merge-check`·`verify`가 검사

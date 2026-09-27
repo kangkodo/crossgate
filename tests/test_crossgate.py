@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """킷 자체 검사. 임시 git 저장소에 설치해서 판정 기록·병합 조건·조정 감지·마스킹을 확인한다.
 
-  python3 tests/test_pipeline.py
+  python3 tests/test_crossgate.py
 """
 import importlib.machinery
 import json
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,7 +21,7 @@ def sh(cmd, cwd, ok=True):
 
 
 def P(args, cwd, ok=True):
-    return sh(f"python3 .pipeline/kit/bin/pipeline {args}", cwd, ok)
+    return sh(f"python3 .crossgate/kit/bin/crossgate {args}", cwd, ok)
 
 
 def commit(cwd, msg):
@@ -28,7 +29,7 @@ def commit(cwd, msg):
 
 
 def test_mask():
-    mod = importlib.machinery.SourceFileLoader("pipeline", str(KIT / "bin" / "pipeline")).load_module()
+    mod = importlib.machinery.SourceFileLoader("crossgate", str(KIT / "bin" / "crossgate")).load_module()
     assert mod.mask("token=abcdef123456") == "token=***"
     assert mod.mask('"api_key": "zzzzzzzz"') == '"api_key": "***"'
     assert mod.mask("Authorization: Bearer abcdefghij") == "Authorization: Bearer ***"
@@ -43,11 +44,11 @@ def test_flow():
         (repo / "app.js").write_text("console.log(1)\n")
         commit(repo, "init")
         sh(f"sh {KIT}/install.sh --dev .", repo)
-        cfg = json.loads((repo / ".pipeline/config.json").read_text())
+        cfg = json.loads((repo / ".crossgate/config.json").read_text())
         cfg.update(gate=[{"name": "ok", "run": "true"}], forbidden=["wrangler.toml"])
-        (repo / ".pipeline/config.json").write_text(json.dumps(cfg))
+        (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
         commit(repo, "install kit")
-        assert "ai-pipeline-kit:start" in (repo / "CLAUDE.md").read_text()
+        assert "crossgate:start" in (repo / "CLAUDE.md").read_text()
 
         sh("git switch -qc pipe/demo", repo)
         run = P("init-run '데모 작업'", repo).stdout.strip()
@@ -56,9 +57,9 @@ def test_flow():
 
         # 개발 AI가 보호 경로를 건드리면 gate가 막는다
         base = sh("git rev-parse HEAD", repo).stdout.strip()
-        (repo / ".pipeline/config.json").write_text(json.dumps(cfg) + " ")
+        (repo / ".crossgate/config.json").write_text(json.dumps(cfg) + " ")
         assert P(f"gate --protect-since {base}", repo, ok=False).returncode
-        sh("git checkout -- .pipeline/config.json", repo)
+        sh("git checkout -- .crossgate/config.json", repo)
         assert "gate 통과" in P(f"gate --protect-since {base}", repo).stdout
 
         (repo / "app.js").write_text("console.log(2)\n")
@@ -106,7 +107,7 @@ def test_flow():
 
 
 def test_usage():
-    mod = importlib.machinery.SourceFileLoader("pipeline", str(KIT / "bin" / "pipeline")).load_module()
+    mod = importlib.machinery.SourceFileLoader("crossgate", str(KIT / "bin" / "crossgate")).load_module()
     out = "\n".join([
         '{"type":"thread.started"}',
         '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":7,"reasoning_output_tokens":3}}',
@@ -124,9 +125,9 @@ def test_gate_todo_checks():
         (repo / "a.js").write_text("1\n")
         commit(repo, "init")
         sh(f"sh {KIT}/install.sh --dev .", repo)
-        cfg = json.loads((repo / ".pipeline/config.json").read_text())
+        cfg = json.loads((repo / ".crossgate/config.json").read_text())
         cfg.update(gate=[{"name": "ok", "run": "true"}])
-        (repo / ".pipeline/config.json").write_text(json.dumps(cfg))
+        (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
         run = P("init-run t", repo).stdout.strip()
         todo = repo / run / "01-planning/todo.md"
         todo.write_text("- [ ] DEV-001 한다\n  확인 방법: AC-1\n- [ ] DEV-002 또 한다\n")
@@ -150,9 +151,9 @@ def fresh_repo(d):
     (repo / "a.js").write_text("1\n")
     commit(repo, "init")
     sh(f"sh {KIT}/install.sh --dev .", repo)
-    cfg = json.loads((repo / ".pipeline/config.json").read_text())
+    cfg = json.loads((repo / ".crossgate/config.json").read_text())
     cfg.update(gate=[{"name": "ok", "run": "true"}])
-    (repo / ".pipeline/config.json").write_text(json.dumps(cfg))
+    (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
     commit(repo, "kit")
     return repo
 
@@ -161,19 +162,58 @@ def test_seal_and_tag_install():
     with tempfile.TemporaryDirectory() as d:
         repo = fresh_repo(d)
         assert "봉인 유지" in P("verify", repo).stdout
-        assert "# source: dev" in (repo / ".pipeline/kit/MANIFEST.sha256").read_text()
-        card = repo / ".pipeline/kit/roles/qa.md"
+        assert "# source: dev" in (repo / ".crossgate/kit/MANIFEST.sha256").read_text()
+        card = repo / ".crossgate/kit/roles/qa.md"
         card.write_text(card.read_text() + "\n몰래 고침\n")
         out = P("verify", repo, ok=False)
         assert out.returncode and "변경됨: roles/qa.md" in out.stderr, out.stderr
         assert "킷 복사본이 원본과 다릅니다" in P("gate", repo, ok=False).stderr
-        (repo / ".pipeline/kit/roles/extra.md").write_text("x")
+        (repo / ".crossgate/kit/roles/extra.md").write_text("x")
         assert "추가됨: roles/extra.md" in P("verify", repo, ok=False).stderr
-        # 태그에서 설치하면 그 태그의 내용과 출처가 봉인된다
-        sh(f"sh {KIT}/install.sh --ref v0.1.2 .", repo)
-        assert (repo / ".pipeline/kit/VERSION").read_text().strip() == "0.1.2"
-        assert "# source: v0.1.2" in (repo / ".pipeline/kit/MANIFEST.sha256").read_text()
-        assert not (repo / ".pipeline/kit/roles/extra.md").exists()
+        # 태그에서 설치하면 그 태그의 내용과 출처가 봉인된다(작업 트리를 임시 저장소에 커밋·태그해 시험)
+        kit = Path(d) / "kitcopy"
+        shutil.copytree(KIT, kit, ignore=shutil.ignore_patterns(".git"))
+        sh("git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm k && git tag v9.9.9", kit)
+        (kit / "VERSION").write_text("dirty-not-installed\n")  # 작업 중 변경은 태그 설치에 섞이면 안 된다
+        sh(f"sh {kit}/install.sh --ref v9.9.9 .", repo)
+        assert (repo / ".crossgate/kit/VERSION").read_text().strip() == (KIT / "VERSION").read_text().strip()
+        assert "# source: v9.9.9" in (repo / ".crossgate/kit/MANIFEST.sha256").read_text()
+        assert not (repo / ".crossgate/kit/roles/extra.md").exists()
+
+
+def test_migrate_from_0_1():
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "proj"
+        repo.mkdir()
+        sh("git init -q -b main && git config user.email t@t && git config user.name t", repo)
+        (repo / "CLAUDE.md").write_text("# 프로젝트\n\n배포는 `pipeline deploy`로 한다.\n")
+        (repo / ".github/workflows").mkdir(parents=True)
+        (repo / ".github/workflows/pipeline-check.yml").write_text("run: python3 .pipeline/kit/bin/pipeline merge-check\n")
+        commit(repo, "init")
+        old = Path(d) / "old"
+        old.mkdir()
+        sh(f"git -C {KIT} archive v0.1.3 | tar -x -C {old}", repo)
+        sh(f"sh {old}/install.sh --dev .", repo)
+        cfg = json.loads((repo / ".pipeline/config.json").read_text())
+        cfg["gate"] = [{"name": "mine", "run": "true"}]
+        (repo / ".pipeline/config.json").write_text(json.dumps(cfg))
+        (repo / ".pipeline/current-run").write_text("ai-log/x")
+        sh(f"sh {KIT}/install.sh --dev .", repo)
+        assert not (repo / ".pipeline").exists()
+        new_cfg = json.loads((repo / ".crossgate/config.json").read_text())
+        assert new_cfg["gate"] == [{"name": "mine", "run": "true"}], "프로젝트 설정 보존"
+        assert ".crossgate/*" in new_cfg["protected"] and not any(".pipeline" in x for x in new_cfg["protected"])
+        assert (repo / ".crossgate/current-run").read_text() == "ai-log/x"
+        assert not (repo / ".claude/skills/pipeline").exists() and not (repo / ".claude/agents/pipeline-reviewer.md").exists()
+        assert (repo / ".claude/skills/crossgate/SKILL.md").exists()
+        for name in ("AGENTS.md", "CLAUDE.md"):
+            t = (repo / name).read_text()
+            assert "ai-pipeline-kit" not in t and t.count("crossgate:start") == 1, name
+        assert "`crossgate deploy`" in (repo / "CLAUDE.md").read_text()
+        gi = (repo / ".gitignore").read_text()
+        assert ".crossgate/current-run" in gi and ".pipeline" not in gi
+        assert ".crossgate/kit/bin/crossgate" in (repo / ".github/workflows/pipeline-check.yml").read_text()
+        assert "봉인 유지" in P("verify", repo).stdout
 
 
 def test_usage_append_only():
@@ -211,12 +251,12 @@ echo '{{"type":"turn.completed","usage":{{"input_tokens":5,"output_tokens":1}}}}
             f.chmod(0o755)
         (repo / "q.md").write_text("검수")
         env = f"PATH={fake}:$PATH "
-        sh(env + "python3 .pipeline/kit/bin/pipeline claude dev-reviewer --prompt-file q.md", repo)
+        sh(env + "python3 .crossgate/kit/bin/crossgate claude dev-reviewer --prompt-file q.md", repo)
         args = log.read_text()
         for flag in ("--tools Read,Grep,Glob", "--permission-mode dontAsk", "--strict-mcp-config"):
             assert flag in args, (flag, args)
-        assert sh(env + "python3 .pipeline/kit/bin/pipeline claude developer --prompt-file q.md", repo, ok=False).returncode
-        sh(env + "python3 .pipeline/kit/bin/pipeline codex plan-reviewer --prompt-file q.md", repo)
+        assert sh(env + "python3 .crossgate/kit/bin/crossgate claude developer --prompt-file q.md", repo, ok=False).returncode
+        sh(env + "python3 .crossgate/kit/bin/crossgate codex plan-reviewer --prompt-file q.md", repo)
         assert "-s read-only" in log.read_text().splitlines()[-1]
         recs = [json.loads(line) for line in (repo / run / "usage.jsonl").read_text().splitlines()]
         assert [r["engine"] for r in recs] == ["claude", "codex"]
@@ -229,7 +269,8 @@ if __name__ == "__main__":
     test_usage()
     test_gate_todo_checks()
     test_seal_and_tag_install()
+    test_migrate_from_0_1()
     test_usage_append_only()
     test_reviewers_are_forced_read_only()
     test_flow()
-    print("ok: pipeline kit checks passed")
+    print("ok: crossgate checks passed")

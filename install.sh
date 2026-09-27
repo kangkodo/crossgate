@@ -1,8 +1,8 @@
 #!/bin/sh
 # 사용법: install.sh [--ref 태그 | --dev] <프로젝트 경로>
-# 킷을 프로젝트의 .pipeline/kit/ 에 설치하거나 업그레이드한다.
+# 킷을 프로젝트의 .crossgate/kit/ 에 설치하거나 업그레이드한다.
 # 기본은 최신 태그에서 설치한다(원본의 작업 중 변경이 섞이지 않게). --dev 는 작업 트리를 그대로 설치한다(시험용).
-# 설치 뒤 MANIFEST.sha256 으로 복사본을 봉인한다. 프로젝트 설정(.pipeline/config.json)은 없을 때만 만든다.
+# 설치 뒤 MANIFEST.sha256 으로 복사본을 봉인한다. 프로젝트 설정(.crossgate/config.json)은 없을 때만 만든다.
 set -eu
 KIT=$(cd "$(dirname "$0")" && pwd)
 REF=""
@@ -20,22 +20,55 @@ git -C "$DEST" rev-parse --show-toplevel >/dev/null
 SRC=$(mktemp -d)
 trap 'rm -rf "$SRC"' EXIT
 if [ "$DEV" = 1 ]; then
-  cp -R "$KIT/PIPELINE.md" "$KIT/VERSION" "$KIT/roles" "$KIT/templates" "$KIT/bin" "$KIT/claude" "$SRC/"
+  cp -R "$KIT/CROSSGATE.md" "$KIT/VERSION" "$KIT/roles" "$KIT/templates" "$KIT/bin" "$KIT/claude" "$SRC/"
   SOURCE="dev (작업 트리)"
 else
   [ -n "$REF" ] || REF=$(git -C "$KIT" describe --tags --abbrev=0)
-  git -C "$KIT" archive "$REF" PIPELINE.md VERSION roles templates bin claude | tar -x -C "$SRC"
+  git -C "$KIT" archive "$REF" CROSSGATE.md VERSION roles templates bin claude | tar -x -C "$SRC"
   SOURCE="$REF ($(git -C "$KIT" rev-parse --short "$REF^{commit}"))"
 fi
 VERSION=$(cat "$SRC/VERSION")
 
-rm -rf "$DEST/.pipeline/kit"
-mkdir -p "$DEST/.pipeline/kit" "$DEST/.claude/skills/pipeline" "$DEST/.claude/agents"
-cp -R "$SRC/PIPELINE.md" "$SRC/VERSION" "$SRC/roles" "$SRC/templates" "$SRC/bin" "$DEST/.pipeline/kit/"
-cp "$SRC/claude/skills/pipeline/SKILL.md" "$DEST/.claude/skills/pipeline/SKILL.md"
-cp "$SRC/claude/agents/pipeline-reviewer.md" "$DEST/.claude/agents/pipeline-reviewer.md"
-# 봉인은 설치기가 직접 쓴다(옛 태그의 CLI에는 verify가 없을 수 있음). 형식은 bin/pipeline의 verify_kit과 같다.
-python3 - "$DEST/.pipeline/kit" "$SOURCE" <<'PY'
+# 0.1.x(옛 이름 ai-pipeline-kit)에서 올라오는 프로젝트: .pipeline → .crossgate 이전
+if [ -d "$DEST/.pipeline" ]; then
+  python3 - "$DEST" <<'PY'
+import json, re, shutil, sys
+from pathlib import Path
+d = Path(sys.argv[1]); old, new = d / ".pipeline", d / ".crossgate"
+new.mkdir(exist_ok=True)
+if (old / "config.json").exists() and not (new / "config.json").exists():
+    cfg = json.loads((old / "config.json").read_text(encoding="utf-8"))
+    cfg["protected"] = [p.replace(".pipeline/", ".crossgate/") for p in cfg.get("protected", [])]
+    (new / "config.json").write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+if (old / "current-run").exists():
+    shutil.move(str(old / "current-run"), str(new / "current-run"))
+shutil.rmtree(old)
+shutil.rmtree(d / ".claude/skills/pipeline", ignore_errors=True)
+(d / ".claude/agents/pipeline-reviewer.md").unlink(missing_ok=True)
+for name in ("AGENTS.md", "CLAUDE.md"):
+    f = d / name
+    if f.exists():
+        t = re.sub(r"\n*<!-- ai-pipeline-kit:start -->.*?<!-- ai-pipeline-kit:end -->\n?", "\n", f.read_text(encoding="utf-8"), flags=re.S)
+        t = t.replace("`pipeline deploy`", "`crossgate deploy`")
+        f.write_text(t.rstrip("\n") + "\n", encoding="utf-8")
+g = d / ".gitignore"
+if g.exists():
+    g.write_text(g.read_text(encoding="utf-8").replace("# ai-pipeline-kit", "# crossgate").replace(".pipeline/current-run", ".crossgate/current-run"), encoding="utf-8")
+for wf in (d / ".github/workflows").glob("*.yml"):
+    t = wf.read_text(encoding="utf-8")
+    if ".pipeline/kit/bin/pipeline" in t:
+        wf.write_text(t.replace(".pipeline/kit/bin/pipeline", ".crossgate/kit/bin/crossgate"), encoding="utf-8")
+print("이전: .pipeline → .crossgate (설정·현재 실행·안내 단락·.gitignore·CI 경로)")
+PY
+fi
+
+rm -rf "$DEST/.crossgate/kit"
+mkdir -p "$DEST/.crossgate/kit" "$DEST/.claude/skills/crossgate" "$DEST/.claude/agents"
+cp -R "$SRC/CROSSGATE.md" "$SRC/VERSION" "$SRC/roles" "$SRC/templates" "$SRC/bin" "$DEST/.crossgate/kit/"
+cp "$SRC/claude/skills/crossgate/SKILL.md" "$DEST/.claude/skills/crossgate/SKILL.md"
+cp "$SRC/claude/agents/crossgate-reviewer.md" "$DEST/.claude/agents/crossgate-reviewer.md"
+# 봉인은 설치기가 직접 쓴다(옛 태그의 CLI에는 verify가 없을 수 있음). 형식은 bin/crossgate의 verify_kit과 같다.
+python3 - "$DEST/.crossgate/kit" "$SOURCE" <<'PY'
 import hashlib, sys
 from pathlib import Path
 base, source = Path(sys.argv[1]), sys.argv[2]
@@ -45,25 +78,25 @@ lines = [f"# source: {source}"] + [f"{hashlib.sha256((base / f).read_bytes()).he
 (base / "MANIFEST.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
-if [ ! -f "$DEST/.pipeline/config.json" ]; then
-  cp "$SRC/templates/config.json" "$DEST/.pipeline/config.json"
-  echo "만듦: .pipeline/config.json (gate·forbidden·deploy를 프로젝트에 맞게 고치세요)"
+if [ ! -f "$DEST/.crossgate/config.json" ]; then
+  cp "$SRC/templates/config.json" "$DEST/.crossgate/config.json"
+  echo "만듦: .crossgate/config.json (gate·forbidden·deploy를 프로젝트에 맞게 고치세요)"
 fi
 
 for f in AGENTS.md CLAUDE.md; do
-  if ! grep -q "ai-pipeline-kit:start" "$DEST/$f" 2>/dev/null; then
+  if ! grep -q "crossgate:start" "$DEST/$f" 2>/dev/null; then
     { [ -f "$DEST/$f" ] && echo; cat "$SRC/templates/agents-snippet.md"; } >> "$DEST/$f"
     echo "추가: $f 에 파이프라인 안내"
   fi
 done
 
 touch "$DEST/.gitignore"
-if ! grep -q "# ai-pipeline-kit" "$DEST/.gitignore"; then
+if ! grep -q "# crossgate" "$DEST/.gitignore"; then
   { echo; cat "$SRC/templates/gitignore-snippet"; } >> "$DEST/.gitignore"
   echo "추가: .gitignore 항목"
 fi
 
-if [ ! -f "$DEST/.github/workflows/pipeline-check.yml" ]; then
-  echo "참고: CI 검사는 templates/pipeline-check.yml 을 .github/workflows/ 에 복사해서 켭니다(대상 브랜치 확인 후)."
+if [ ! -f "$DEST/.github/workflows/crossgate.yml" ]; then
+  echo "참고: CI 검사는 templates/crossgate.yml 을 .github/workflows/ 에 복사해서 켭니다(대상 브랜치 확인 후)."
 fi
-echo "설치 완료: ai-pipeline-kit $VERSION [$SOURCE] → $DEST (봉인: .pipeline/kit/MANIFEST.sha256)"
+echo "설치 완료: crossgate $VERSION [$SOURCE] → $DEST (봉인: .crossgate/kit/MANIFEST.sha256)"
