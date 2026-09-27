@@ -274,7 +274,15 @@ def test_setup_skill_and_kit_source():
         assert "{{KIT}}" not in skill and str(KIT) in skill and "name: crossgate-setup" in skill
         repo = fresh_repo(d)
         cfg = json.loads((repo / ".crossgate/config.json").read_text())
-        assert cfg["kit_source"] == str(KIT)
+        assert "kit_source" not in cfg and "kit_remote" not in cfg, "개인 경로는 커밋 대상 설정에 넣지 않는다"
+        assert json.loads((repo / ".crossgate/local.json").read_text())["kit_source"] == str(KIT)
+        assert sh("git check-ignore -q .crossgate/local.json && echo ignored", repo).stdout.strip() == "ignored"
+        # 0.2.1이 config.json에 넣은 값은 재설치 때 local.json으로 옮겨진다
+        cfg["kit_source"] = "/old/path"; cfg["kit_remote"] = "x"
+        (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
+        sh(f"sh {KIT}/install.sh --dev .", repo)
+        cfg2 = json.loads((repo / ".crossgate/config.json").read_text())
+        assert "kit_source" not in cfg2 and "kit_remote" not in cfg2
         assert (repo / ".claude/skills/crossgate/SKILL.md").read_text().count("## 8. 업그레이드") == 1
 
 

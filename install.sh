@@ -103,19 +103,26 @@ if ! grep -q "# crossgate" "$DEST/.gitignore"; then
   { echo; cat "$SRC/templates/gitignore-snippet"; } >> "$DEST/.gitignore"
   echo "추가: .gitignore 항목"
 fi
+# 이전 버전 설치본에는 local.json 줄이 없다
+grep -q "^.crossgate/local.json$" "$DEST/.gitignore" || printf '.crossgate/local.json\n' >> "$DEST/.gitignore"
 
 if [ ! -f "$DEST/.github/workflows/crossgate.yml" ]; then
   echo "참고: CI 검사는 templates/crossgate.yml 을 .github/workflows/ 에 복사해서 켭니다(대상 브랜치 확인 후)."
 fi
-# 이 프로젝트가 어느 원본에서 설치됐는지 기록한다(업그레이드 때 씀). 원본 저장소에는 남지 않는다.
-python3 - "$DEST/.crossgate/config.json" "$KIT" "$(git -C "$KIT" remote get-url origin 2>/dev/null || true)" <<'PY'
+# 이 컴퓨터에서 원본이 어디 있는지 기록한다(업그레이드 때 씀). 컴퓨터마다 다르고 개인 경로가 들어가므로
+# git이 무시하는 .crossgate/local.json 에만 둔다. 0.2.1이 config.json에 넣은 값은 여기로 옮긴다.
+python3 - "$DEST/.crossgate" "$KIT" "$(git -C "$KIT" remote get-url origin 2>/dev/null || true)" <<'PY'
 import json, sys
 from pathlib import Path
-p, kit, remote = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-c = json.loads(p.read_text(encoding="utf-8"))
-c["kit_source"] = kit
+base, kit, remote = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+cfg = base / "config.json"
+c = json.loads(cfg.read_text(encoding="utf-8"))
+c.pop("kit_source", None)
+c.pop("kit_remote", None)
+cfg.write_text(json.dumps(c, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+local = {"kit_source": kit}
 if remote:
-    c["kit_remote"] = remote
-p.write_text(json.dumps(c, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    local["kit_remote"] = remote
+(base / "local.json").write_text(json.dumps(local, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 echo "설치 완료: crossgate $VERSION [$SOURCE] → $DEST (봉인: .crossgate/kit/MANIFEST.sha256)"

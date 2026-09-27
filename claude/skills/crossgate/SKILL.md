@@ -70,7 +70,7 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 
 사용자가 크게를 새 버전으로 올려 달라고 하면 개발 작업 대신 이 절차를 따른다.
 
-1. 설치된 버전은 `.crossgate/kit/VERSION`, 원본 위치는 `.crossgate/config.json`의 `kit_source`다. 그 폴더가 없으면 `kit_remote`를 임시 폴더에 clone해서 쓴다.
+1. 설치된 버전은 `.crossgate/kit/VERSION`, 원본 위치는 `.crossgate/local.json`의 `kit_source`(이 컴퓨터 전용, git 제외)다. 그 폴더가 없으면 `kit_remote`를 임시 폴더에 clone해서 쓴다. `local.json`이 없으면(다른 컴퓨터에서 받은 저장소) 사용자에게 원본 위치를 묻는다.
 2. 원본에 원격이 있으면 `git -C <원본> fetch -q --tags` 후, 최신 태그를 `git -C <원본> tag --sort=-v:refname | head -1`로 찾는다.
 3. 설치된 버전과 같으면 "최신입니다"라고 보고하고 끝낸다.
 4. 다르면 작업 트리가 깨끗한지 확인하고 브랜치 `crossgate-<버전>`을 만든다. 그다음 `sh <원본>/install.sh --ref <태그> .`로 설치하고, `config.json`의 `kit_version`을 올리고, `$P verify`와 `$P gate`를 돌린다.
