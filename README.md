@@ -27,6 +27,16 @@ sh ~/Documents/projects/crossgate/install.sh <프로젝트 경로>
 설치하면 `.crossgate/kit/`(킷 사본, 덮어씀), `.crossgate/config.json`(없을 때만 생성), `.claude/skills/crossgate/`, `.claude/agents/crossgate-reviewer.md`가 생긴다. AGENTS.md·CLAUDE.md에는 안내 한 단락, .gitignore에는 항목이 추가된다.
 그다음 `config.json`의 `gate`, `forbidden`, `deploy`를 프로젝트에 맞게 고친다. CI 검사를 켜려면 `templates/crossgate.yml`을 복사한다.
 
+### 작업공간(PM 모드)
+
+git이 아닌 루트 아래 저장소가 여러 개이고 자체 작업 절차가 있으면 엔진만 설치한다.
+
+```bash
+sh ~/Documents/projects/crossgate/install.sh --workspace <작업공간 루트>
+```
+
+`config.json`의 `repos`에 저장소별 `gate`·`protected`를 적고, `codex`·`gate`·`verdict`에 `--repo`를 준다(CROSSGATE.md 11절).
+
 ## 전역 스킬 (한 번만)
 
 ```bash

@@ -12,6 +12,9 @@
   merge-check --base REF         병합 위임 조건 판정 (CI 필수 검사로도 사용)
   deploy [--yes]                 배포 미리보기, --yes 면 실행 (사용자 지시가 있을 때만)
   clean-raw [--days N]           기한이 지난 raw/ 와 QA 캡처 삭제
+
+PM 모드(config.mode = "pm"): git이 아닌 작업공간 루트에서 저장소 여러 개(config.repos)를 다룬다.
+  codex·gate·verdict 에 --repo NAME 을 주면 그 저장소를 기준으로 동작한다. 개발 역할의 쓰기는 그 저장소 안으로 제한된다.
 """
 import argparse
 import datetime as dt
@@ -44,15 +47,18 @@ def mask(text):
     return SECRET.sub(lambda m: m.group(1) + "***" if m.group(1) else "***", text)
 
 
-def git(*args, check=True, strip=True):
+def git(*args, check=True, strip=True, cwd=None):
     # quotepath=false: 한글 경로를 이스케이프하지 않아야 경로 비교가 맞는다
-    r = subprocess.run(["git", "-c", "core.quotepath=false", *args], capture_output=True, text=True)
+    r = subprocess.run(["git", "-c", "core.quotepath=false", *args], capture_output=True, text=True, cwd=cwd)
     if check and r.returncode:
         sys.exit(f"git {' '.join(args)} 실패: {r.stderr.strip()}")
     return r.stdout.strip() if strip else r.stdout
 
 
 def root():
+    # 설치된 킷(<루트>/.crossgate/kit)은 자기 루트를 안다. git이 아닌 작업공간 루트도 이것으로 찾는다.
+    if KIT.parent.name == ".crossgate":
+        return KIT.parent.parent
     return Path(git("rev-parse", "--show-toplevel"))
 
 
@@ -113,6 +119,23 @@ def config():
     return cfg
 
 
+def is_pm(cfg):
+    return cfg.get("mode") == "pm"
+
+
+def repo_dir(cfg, name):
+    """PM 모드에서 --repo 로 고른 저장소 폴더. 이름이 없으면 None."""
+    if not name:
+        return None
+    rc = cfg.get("repos", {}).get(name)
+    if rc is None:
+        sys.exit(f"config.repos 에 없는 저장소: {name}")
+    d = root() / rc.get("path", name)
+    if not (d / ".git").exists():
+        sys.exit(f"git 저장소가 아닙니다: {d}")
+    return d
+
+
 def current_run(arg=None):
     if arg:
         return Path(arg).resolve()
@@ -151,6 +174,11 @@ def escalation(recs, stage, cap):
     return None
 
 
+def at(x):
+    """판정이 묶인 버전: 저장소@커밋. 버전에 묶이지 않은 판정은 '-'."""
+    return (x["repo"] + "@" if x.get("repo") else "") + (x.get("commit") or "-")[:7]
+
+
 def write_timeline(run):
     rows = ["# 판정 타임라인", "", "`crossgate verdict`가 자동 생성한다. 직접 수정하지 않는다.", "",
             "| 시각 | 단계 | 회차 | 판정 | 주체 | 커밋 | 지적 | 비고 |", "|---|---|---|---|---|---|---|---|"]
@@ -159,7 +187,7 @@ def write_timeline(run):
         who = " ".join(filter(None, [x.get("actor"), x.get("model")]))
         note = (x.get("note") or "").replace("|", "/").replace("\n", " ")
         rows.append(f"| {x['ts'][5:16].replace('T', ' ')} | {x['stage']} | {x['attempt']} | {LABEL[x['verdict']]} "
-                    f"| {who} | {x['commit'][:7]} | {issues} | {note} |")
+                    f"| {who} | {at(x)} | {issues} | {note} |")
     (run / "timeline.md").write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
@@ -174,7 +202,7 @@ def cmd_init_run(a):
         (run / d).mkdir(parents=True)
     shutil.copy(KIT / "templates" / "request.md", run / "00-request" / "request.md")
     meta = {"slug": slug, "route": "quick" if a.quick else "full",
-            "branch": git("rev-parse", "--abbrev-ref", "HEAD"), "created": now.isoformat(timespec="seconds")}
+            "branch": git("rev-parse", "--abbrev-ref", "HEAD", check=False, cwd=r) or None, "created": now.isoformat(timespec="seconds")}
     (run / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (r / ".crossgate" / "current-run").write_text(str(run.relative_to(r)))
     print(run.relative_to(r))
@@ -186,6 +214,9 @@ def cmd_codex(a):
     if a.role not in READ_ONLY_ROLES | WRITE_ROLES:
         sys.exit(f"Codex가 맡을 수 없는 역할: {a.role}")
     sandbox = "read-only" if a.role in READ_ONLY_ROLES else "workspace-write"
+    repo = repo_dir(cfg, a.repo)
+    if is_pm(cfg) and sandbox == "workspace-write" and not repo:
+        sys.exit("PM 모드의 개발·QA 역할은 --repo 가 필요합니다(쓰기를 저장소 하나로 제한).")
     c = cfg.get("codex", {})
     effort = c.get("effort", {}).get(a.role, c.get("default_effort", "high"))
     task = Path(a.prompt_file).read_text(encoding="utf-8")
@@ -193,11 +224,14 @@ def cmd_codex(a):
         (KIT / "roles" / f"{a.role}.md").read_text(encoding="utf-8"),
         (KIT / "CROSSGATE.md").read_text(encoding="utf-8"),
         f"# 이번 작업\n\n실행 기록 폴더: `{run.relative_to(r)}`\n\n{task}"])
+    if repo and sandbox == "workspace-write":
+        prompt += (f"\n\n---\n\n작업 저장소: `{repo.relative_to(r)}`. 쓰기는 이 저장소 안에서만 된다. "
+                   "실행 기록 폴더는 쓸 수 없으니 todo.md 체크 대신 항목별 완료 근거를 답변에 적는다.")
     stamp = dt.datetime.now().strftime("%H%M%S")
     out = run / "raw" / f"{stamp}_{a.role}_reply.md"
     model = c.get("model", "gpt-6-astra")
     cmd = ["codex", "exec", "-m", model, "-c", f"model_reasoning_effort={effort}",
-           "-s", sandbox, "--skip-git-repo-check", "--json", "-o", str(out), "-"]
+           "-s", sandbox, "-C", str(repo or r), "--skip-git-repo-check", "--json", "-o", str(out), "-"]
     if c.get("ephemeral"):
         cmd.insert(-1, "--ephemeral")
     if sandbox == "workspace-write" and c.get("network"):
@@ -306,19 +340,23 @@ def cmd_claude(a):
 def cmd_gate(a):
     require_sealed()
     cfg, r = config(), root()
+    repo = repo_dir(cfg, a.repo)
+    if is_pm(cfg) and not repo:
+        sys.exit("PM 모드의 gate 는 --repo 가 필요합니다.")
+    rc, cwd = (cfg["repos"][a.repo], repo) if repo else (cfg, r)
     failed = []
     if a.protect_since:
-        changed = set(git("diff", "--name-only", a.protect_since).splitlines())
-        changed |= set(git("ls-files", "--others", "--exclude-standard").splitlines())
-        hit = sorted(f for f in changed if match(f, cfg.get("protected", []))
+        changed = set(git("diff", "--name-only", a.protect_since, cwd=cwd).splitlines())
+        changed |= set(git("ls-files", "--others", "--exclude-standard", cwd=cwd).splitlines())
+        hit = sorted(f for f in changed if match(f, rc.get("protected", []))
                      and not (match(f, [TODO_FILE]) and todo_checks_only(a.protect_since, f))
                      and not (match(f, [USAGE_FILE]) and appended_only(a.protect_since, f)))
         if hit:
             failed.append("보호 경로 변경: " + ", ".join(hit))
     # 명령은 프로젝트의 config.json에서 온다(package.json 스크립트와 같은 신뢰 수준). config는 보호 경로다.
-    for g in cfg.get("gate", []):
+    for g in rc.get("gate", []):
         print(f"▶ {g['name']}: {g['run']}", flush=True)
-        if subprocess.run(g["run"], shell=True, cwd=r).returncode:
+        if subprocess.run(g["run"], shell=True, cwd=cwd).returncode:
             failed.append(g["name"])
     if failed:
         sys.exit("gate 실패: " + " / ".join(failed))
@@ -326,12 +364,15 @@ def cmd_gate(a):
 
 
 def cmd_verdict(a):
-    run = current_run(a.run)
+    cfg, run = config(), current_run(a.run)
     recs = load(run)
+    repo = repo_dir(cfg, a.repo)
+    # PM 모드에서 저장소를 고르지 않은 판정(요청·기획 등)은 코드 버전에 묶지 않는다
+    versioned = bool(repo) or not is_pm(cfg)
     if a.verdict in ("APPROVED", "PASSED"):
         if a.unverified:
             sys.exit("미검증 항목이 있으면 승인할 수 없습니다 (R13).")
-        dirty = [line for line in git("status", "--porcelain", strip=False).splitlines()
+        dirty = versioned and [line for line in git("status", "--porcelain", strip=False, cwd=repo).splitlines()
                  if line.strip() and not line[3:].strip('"').startswith("ai-log/")]
         if dirty:
             sys.exit("커밋되지 않은 변경이 있습니다. 승인은 커밋된 상태에만 기록합니다.\n" + "\n".join(dirty[:10]))
@@ -339,14 +380,15 @@ def cmd_verdict(a):
     attempt = a.attempt or (len(submissions) + (1 if a.verdict == "READY" else 0)) or 1
     issues = dict(kv.split("=", 1) for kv in a.issues.split(",")) if a.issues else {}
     rec = {"ts": dt.datetime.now().isoformat(timespec="seconds"), "stage": a.stage, "attempt": attempt,
-           "verdict": a.verdict, "actor": a.actor, "model": a.model, "commit": git("rev-parse", "HEAD"),
+           "verdict": a.verdict, "actor": a.actor, "model": a.model,
+           "commit": git("rev-parse", "HEAD", cwd=repo) if versioned else None, "repo": a.repo,
            "issues": issues, "unverified": a.unverified or [], "evidence": a.evidence or [],
            "tokens": a.tokens, "note": a.note}
     with open(run / "verdicts.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     write_timeline(run)
-    print(f"기록: {a.stage} #{attempt} {LABEL[a.verdict]} @ {rec['commit'][:7]}")
-    esc = escalation(load(run), a.stage, config().get("cap", 3))
+    print(f"기록: {a.stage} #{attempt} {LABEL[a.verdict]} @ {at(rec)}")
+    esc = escalation(load(run), a.stage, cfg.get("cap", 3))
     if esc:
         print(f"조정 필요: {esc}. ESCALATED를 기록하고 사용자에게 묻습니다.")
 
@@ -370,7 +412,7 @@ def cmd_status(a):
         rv = reviews(recs, st)
         last = rv[-1] if rv else None
         esc = escalation(recs, st, cap)
-        state = f"{LABEL[last['verdict']]} @ {last['commit'][:7]}" if last else "-"
+        state = f"{LABEL[last['verdict']]} @ {at(last)}" if last else "-"
         opened = ", ".join(sorted(open_ids(last))) if last else ""
         print(f"  {st:<8} 검수 {len(rv)}/{cap}  최신 {state}  {('미해결 ' + opened) if opened else ''}"
               f"{('  ⚠ ' + esc) if esc else ''}")
@@ -379,6 +421,8 @@ def cmd_status(a):
 def cmd_merge_check(a):
     require_sealed()
     cfg = config()
+    if is_pm(cfg):
+        sys.exit("PM 모드에는 merge-check 가 없습니다. 저장소별 병합은 작업공간 규칙(AGENTS.md 등)을 따릅니다.")
     base = git("merge-base", a.base, "HEAD")
     changed = git("diff", "--name-only", base, "HEAD").splitlines()
     runs = sorted({"/".join(f.split("/")[:3]) for f in changed if f.startswith("ai-log/") and f.count("/") >= 3})
@@ -443,18 +487,18 @@ def main(argv=None):
     p = sp.add_parser("init-run"); p.add_argument("slug"); p.add_argument("--quick", action="store_true")
     p.set_defaults(fn=cmd_init_run)
     p = sp.add_parser("codex"); p.add_argument("role"); p.add_argument("--prompt-file", required=True)
-    p.add_argument("--run"); p.set_defaults(fn=cmd_codex)
+    p.add_argument("--run"); p.add_argument("--repo"); p.set_defaults(fn=cmd_codex)
     p = sp.add_parser("claude"); p.add_argument("role"); p.add_argument("--prompt-file", required=True)
     p.add_argument("--run"); p.set_defaults(fn=cmd_claude)
     p = sp.add_parser("verify"); p.set_defaults(fn=cmd_verify)
-    p = sp.add_parser("gate"); p.add_argument("--protect-since"); p.set_defaults(fn=cmd_gate)
+    p = sp.add_parser("gate"); p.add_argument("--protect-since"); p.add_argument("--repo"); p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("verdict")
     p.add_argument("--stage", required=True, choices=["request", "plan", "dev", "qa", "wiki"])
     p.add_argument("--verdict", required=True, choices=VERDICTS)
     p.add_argument("--attempt", type=int); p.add_argument("--actor"); p.add_argument("--model")
     p.add_argument("--issues", help="P-1=open,P-2=resolved"); p.add_argument("--unverified", nargs="*")
     p.add_argument("--evidence", nargs="*"); p.add_argument("--tokens", type=int); p.add_argument("--note")
-    p.add_argument("--run"); p.set_defaults(fn=cmd_verdict)
+    p.add_argument("--run"); p.add_argument("--repo"); p.set_defaults(fn=cmd_verdict)
     p = sp.add_parser("status"); p.add_argument("--run"); p.set_defaults(fn=cmd_status)
     p = sp.add_parser("merge-check"); p.add_argument("--base", required=True); p.set_defaults(fn=cmd_merge_check)
     p = sp.add_parser("deploy"); p.add_argument("--yes", action="store_true"); p.set_defaults(fn=cmd_deploy)

@@ -1,5 +1,13 @@
 # 변경 이력
 
+## 0.3.0 (2026-09-27)
+- PM 모드(작업공간): `install.sh --workspace`로 git이 아닌 루트에 엔진만 설치(스킬·안내 단락·.gitignore·CI 건드리지 않음). 설정 `mode: "pm"`, `repos`
+- `codex`·`gate`·`verdict`에 `--repo`. 개발·QA는 `-C <저장소>`로 쓰기를 그 저장소에 제한, 검수는 루트에서 읽기 전용
+- 판정 기록에 `repo` 추가. 저장소 없는 판정은 `commit: null`. 타임라인·status는 `저장소@커밋`으로 표시
+- 설치된 킷은 자기 루트(`.crossgate/`의 부모)를 쓴다. 하위 폴더나 하위 저장소에서 실행해도 같은 루트
+- Codex 호출에 `-C <작업 루트>`를 명시
+- PM 모드에서 `merge-check`는 안내 후 종료
+
 ## 0.2.2 (2026-09-27)
 - 원본 위치(`kit_source`·`kit_remote`)를 커밋되는 `config.json`이 아니라 git이 무시하는 `.crossgate/local.json`에 기록. 0.2.1은 개인 경로와 비공개 원본 주소를 커밋 대상에 넣었다(공개 저장소면 노출). 설치기가 옛 값을 옮기고 `.gitignore`에 줄을 추가한다
 

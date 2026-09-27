@@ -7,7 +7,7 @@ description: Crossgate(크게, AI 교차검수 개발 파이프라인)를 현재
 
 원본(실행 킷) 위치: `{{KIT}}`. 이 경로는 `install.sh --global`이 설치할 때 기록한다.
 
-현재 폴더가 git 저장소 루트인지 먼저 확인한다. `.crossgate/`가 이미 있으면 "업그레이드"로 간다.
+현재 폴더가 git 저장소 루트인지 먼저 확인한다. `.crossgate/`가 이미 있으면 "업그레이드"로 간다. git이 아닌 폴더 아래 저장소가 여러 개이고 자체 작업 절차가 있으면, 아래 설치 대신 `sh {{KIT}}/install.sh --workspace .`로 PM 모드 엔진만 깔고 `config.json`의 `repos`를 채운다(CROSSGATE.md 11절).
 
 ## 설치
 

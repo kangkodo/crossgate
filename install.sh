@@ -1,5 +1,6 @@
 #!/bin/sh
 # 사용법: install.sh [--ref 태그 | --dev] <프로젝트 경로>
+#         install.sh --workspace <작업공간 경로>   (git이 아닌 루트 + 저장소 여러 개, PM 모드)
 #         install.sh --global   (전역 스킬 /crossgate-setup 을 ~/.claude/skills 에 설치)
 # 킷을 프로젝트의 .crossgate/kit/ 에 설치하거나 업그레이드한다.
 # 기본은 최신 태그에서 설치한다(원본의 작업 중 변경이 섞이지 않게). --dev 는 작업 트리를 그대로 설치한다(시험용).
@@ -8,6 +9,7 @@ set -eu
 KIT=$(cd "$(dirname "$0")" && pwd)
 REF=""
 DEV=0
+WS=0
 if [ "${1:-}" = "--global" ]; then
   G="$HOME/.claude/skills/crossgate-setup"
   mkdir -p "$G"
@@ -19,11 +21,12 @@ while [ $# -gt 1 ]; do
   case "$1" in
     --ref) REF=$2; shift 2 ;;
     --dev) DEV=1; shift ;;
+    --workspace) WS=1; shift ;;
     *) echo "알 수 없는 옵션: $1" >&2; exit 2 ;;
   esac
 done
 DEST=$(cd "${1:?사용법: install.sh [--ref 태그 | --dev] <프로젝트 경로>}" && pwd)
-git -C "$DEST" rev-parse --show-toplevel >/dev/null
+[ "$WS" = 1 ] || git -C "$DEST" rev-parse --show-toplevel >/dev/null
 
 SRC=$(mktemp -d)
 trap 'rm -rf "$SRC"' EXIT
@@ -71,10 +74,14 @@ PY
 fi
 
 rm -rf "$DEST/.crossgate/kit"
-mkdir -p "$DEST/.crossgate/kit" "$DEST/.claude/skills/crossgate" "$DEST/.claude/agents"
+mkdir -p "$DEST/.crossgate/kit"
 cp -R "$SRC/CROSSGATE.md" "$SRC/VERSION" "$SRC/roles" "$SRC/templates" "$SRC/bin" "$DEST/.crossgate/kit/"
-cp "$SRC/claude/skills/crossgate/SKILL.md" "$DEST/.claude/skills/crossgate/SKILL.md"
-cp "$SRC/claude/agents/crossgate-reviewer.md" "$DEST/.claude/agents/crossgate-reviewer.md"
+# 작업공간(PM 모드)은 절차를 작업공간 규칙이 맡는다. 엔진만 깔고 스킬·안내 단락·.gitignore·CI는 건드리지 않는다.
+if [ "$WS" = 0 ]; then
+  mkdir -p "$DEST/.claude/skills/crossgate" "$DEST/.claude/agents"
+  cp "$SRC/claude/skills/crossgate/SKILL.md" "$DEST/.claude/skills/crossgate/SKILL.md"
+  cp "$SRC/claude/agents/crossgate-reviewer.md" "$DEST/.claude/agents/crossgate-reviewer.md"
+fi
 # 봉인은 설치기가 직접 쓴다(옛 태그의 CLI에는 verify가 없을 수 있음). 형식은 bin/crossgate의 verify_kit과 같다.
 python3 - "$DEST/.crossgate/kit" "$SOURCE" <<'PY'
 import hashlib, sys
@@ -87,9 +94,15 @@ lines = [f"# source: {source}"] + [f"{hashlib.sha256((base / f).read_bytes()).he
 PY
 
 if [ ! -f "$DEST/.crossgate/config.json" ]; then
-  cp "$SRC/templates/config.json" "$DEST/.crossgate/config.json"
-  echo "만듦: .crossgate/config.json (gate·forbidden·deploy를 프로젝트에 맞게 고치세요)"
+  if [ "$WS" = 1 ]; then
+    cp "$SRC/templates/config.workspace.json" "$DEST/.crossgate/config.json"
+    echo "만듦: .crossgate/config.json (PM 모드. repos 에 저장소별 gate·protected 를 적으세요)"
+  else
+    cp "$SRC/templates/config.json" "$DEST/.crossgate/config.json"
+    echo "만듦: .crossgate/config.json (gate·forbidden·deploy를 프로젝트에 맞게 고치세요)"
+  fi
 fi
+if [ "$WS" = 0 ]; then
 
 for f in AGENTS.md CLAUDE.md; do
   if ! grep -q "crossgate:start" "$DEST/$f" 2>/dev/null; then
@@ -108,6 +121,7 @@ grep -q "^.crossgate/local.json$" "$DEST/.gitignore" || printf '.crossgate/local
 
 if [ ! -f "$DEST/.github/workflows/crossgate.yml" ]; then
   echo "참고: CI 검사는 templates/crossgate.yml 을 .github/workflows/ 에 복사해서 켭니다(대상 브랜치 확인 후)."
+fi
 fi
 # 이 컴퓨터에서 원본이 어디 있는지 기록한다(업그레이드 때 씀). 컴퓨터마다 다르고 개인 경로가 들어가므로
 # git이 무시하는 .crossgate/local.json 에만 둔다. 0.2.1이 config.json에 넣은 값은 여기로 옮긴다.
