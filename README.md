@@ -27,9 +27,17 @@ sh ~/Documents/projects/crossgate/install.sh <프로젝트 경로>
 설치하면 `.crossgate/kit/`(킷 사본, 덮어씀), `.crossgate/config.json`(없을 때만 생성), `.claude/skills/crossgate/`, `.claude/agents/crossgate-reviewer.md`가 생긴다. AGENTS.md·CLAUDE.md에는 안내 한 단락, .gitignore에는 항목이 추가된다.
 그다음 `config.json`의 `gate`, `forbidden`, `deploy`를 프로젝트에 맞게 고친다. CI 검사를 켜려면 `templates/crossgate.yml`을 복사한다.
 
+## 전역 스킬 (한 번만)
+
+```bash
+sh ~/Documents/projects/crossgate/install.sh --global
+```
+
+어느 폴더에서든 `/crossgate-setup`으로 설치·업그레이드할 수 있게 된다.
+
 ## 사용
 
-Claude Code에서 `/crossgate <요청>`을 입력한다. 간단 수정은 "간단 수정으로"라고 명시한다.
+프로젝트 폴더에서 연 Claude Code에서 `/crossgate <요청>`을 입력한다. 크게를 새 버전으로 올릴 때는 `/crossgate 업그레이드`라고 한다. 간단 수정은 "간단 수정으로"라고 명시한다.
 
 ## 규칙 바꾸기
 

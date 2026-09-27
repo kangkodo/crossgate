@@ -257,11 +257,25 @@ echo '{{"type":"turn.completed","usage":{{"input_tokens":5,"output_tokens":1}}}}
             assert flag in args, (flag, args)
         assert sh(env + "python3 .crossgate/kit/bin/crossgate claude developer --prompt-file q.md", repo, ok=False).returncode
         sh(env + "python3 .crossgate/kit/bin/crossgate codex plan-reviewer --prompt-file q.md", repo)
-        assert "-s read-only" in log.read_text().splitlines()[-1]
+        last = log.read_text().splitlines()[-1]
+        assert "-s read-only" in last and "--ephemeral" not in last, "세션 기록은 기본으로 남긴다"
         recs = [json.loads(line) for line in (repo / run / "usage.jsonl").read_text().splitlines()]
         assert [r["engine"] for r in recs] == ["claude", "codex"]
         assert recs[0]["input_tokens"] == 10 and recs[0]["cost_usd"] == 0.5
         assert "claude 호출 1회" in P("status", repo).stdout
+
+
+def test_setup_skill_and_kit_source():
+    with tempfile.TemporaryDirectory() as d:
+        home = Path(d) / "home"
+        home.mkdir()
+        sh(f"HOME={home} sh {KIT}/install.sh --global", Path(d))
+        skill = (home / ".claude/skills/crossgate-setup/SKILL.md").read_text()
+        assert "{{KIT}}" not in skill and str(KIT) in skill and "name: crossgate-setup" in skill
+        repo = fresh_repo(d)
+        cfg = json.loads((repo / ".crossgate/config.json").read_text())
+        assert cfg["kit_source"] == str(KIT)
+        assert (repo / ".claude/skills/crossgate/SKILL.md").read_text().count("## 8. 업그레이드") == 1
 
 
 if __name__ == "__main__":
@@ -270,6 +284,7 @@ if __name__ == "__main__":
     test_gate_todo_checks()
     test_seal_and_tag_install()
     test_migrate_from_0_1()
+    test_setup_skill_and_kit_source()
     test_usage_append_only()
     test_reviewers_are_forced_read_only()
     test_flow()

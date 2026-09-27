@@ -1,5 +1,6 @@
 #!/bin/sh
 # 사용법: install.sh [--ref 태그 | --dev] <프로젝트 경로>
+#         install.sh --global   (전역 스킬 /crossgate-setup 을 ~/.claude/skills 에 설치)
 # 킷을 프로젝트의 .crossgate/kit/ 에 설치하거나 업그레이드한다.
 # 기본은 최신 태그에서 설치한다(원본의 작업 중 변경이 섞이지 않게). --dev 는 작업 트리를 그대로 설치한다(시험용).
 # 설치 뒤 MANIFEST.sha256 으로 복사본을 봉인한다. 프로젝트 설정(.crossgate/config.json)은 없을 때만 만든다.
@@ -7,6 +8,13 @@ set -eu
 KIT=$(cd "$(dirname "$0")" && pwd)
 REF=""
 DEV=0
+if [ "${1:-}" = "--global" ]; then
+  G="$HOME/.claude/skills/crossgate-setup"
+  mkdir -p "$G"
+  sed "s|{{KIT}}|$KIT|g" "$KIT/claude/global/crossgate-setup/SKILL.md" > "$G/SKILL.md"
+  echo "전역 스킬 설치: $G/SKILL.md (/crossgate-setup, 원본 $KIT)"
+  exit 0
+fi
 while [ $# -gt 1 ]; do
   case "$1" in
     --ref) REF=$2; shift 2 ;;
@@ -99,4 +107,15 @@ fi
 if [ ! -f "$DEST/.github/workflows/crossgate.yml" ]; then
   echo "참고: CI 검사는 templates/crossgate.yml 을 .github/workflows/ 에 복사해서 켭니다(대상 브랜치 확인 후)."
 fi
+# 이 프로젝트가 어느 원본에서 설치됐는지 기록한다(업그레이드 때 씀). 원본 저장소에는 남지 않는다.
+python3 - "$DEST/.crossgate/config.json" "$KIT" "$(git -C "$KIT" remote get-url origin 2>/dev/null || true)" <<'PY'
+import json, sys
+from pathlib import Path
+p, kit, remote = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+c = json.loads(p.read_text(encoding="utf-8"))
+c["kit_source"] = kit
+if remote:
+    c["kit_remote"] = remote
+p.write_text(json.dumps(c, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
 echo "설치 완료: crossgate $VERSION [$SOURCE] → $DEST (봉인: .crossgate/kit/MANIFEST.sha256)"

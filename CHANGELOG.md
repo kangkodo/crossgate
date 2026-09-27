@@ -1,5 +1,11 @@
 # 변경 이력
 
+## 0.2.1 (2026-09-27)
+- 프로젝트 스킬에 `/crossgate 업그레이드` 절차 추가: 원본 최신 태그 확인 → 재설치 PR → 테스트 통과 시 병합 → 보고
+- 전역 스킬 `/crossgate-setup`(`install.sh --global`): 설치되지 않은 폴더에서 적용 전 점검·설치·설정·CI까지. 원본 경로는 설치 때 기록하고 원본 저장소에는 남기지 않는다
+- 설치 때 원본 위치를 프로젝트 `config.json`의 `kit_source`·`kit_remote`에 기록
+- `codex` 호출이 세션 기록을 기본으로 남긴다(Codex 앱에서 사용 내역이 보이게). `config.codex.ephemeral: true`로 끌 수 있다
+
 ## 0.2.0 (2026-09-27) — 이름을 Crossgate로
 이 시스템의 이름을 **Crossgate**(교차 검수 + 단계마다 관문)로 정했다. 옛 이름 `ai-pipeline-kit`과 일반적인 명령어 이름 `pipeline`이 다른 도구와 겹칠 위험을 없앤다.
 - 명령 `pipeline` → `crossgate`, 스킬 `/pipeline` → `/crossgate`, 검수 에이전트 `pipeline-reviewer` → `crossgate-reviewer`
