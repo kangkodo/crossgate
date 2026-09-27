@@ -42,7 +42,7 @@ def test_flow():
         sh("git init -q -b main && git config user.email t@t && git config user.name t", repo)
         (repo / "app.js").write_text("console.log(1)\n")
         commit(repo, "init")
-        sh(f"sh {KIT}/install.sh .", repo)
+        sh(f"sh {KIT}/install.sh --dev .", repo)
         cfg = json.loads((repo / ".pipeline/config.json").read_text())
         cfg.update(gate=[{"name": "ok", "run": "true"}], forbidden=["wrangler.toml"])
         (repo / ".pipeline/config.json").write_text(json.dumps(cfg))
@@ -123,7 +123,7 @@ def test_gate_todo_checks():
         sh("git init -q -b main && git config user.email t@t && git config user.name t", repo)
         (repo / "a.js").write_text("1\n")
         commit(repo, "init")
-        sh(f"sh {KIT}/install.sh .", repo)
+        sh(f"sh {KIT}/install.sh --dev .", repo)
         cfg = json.loads((repo / ".pipeline/config.json").read_text())
         cfg.update(gate=[{"name": "ok", "run": "true"}])
         (repo / ".pipeline/config.json").write_text(json.dumps(cfg))
@@ -144,9 +144,92 @@ def test_gate_todo_checks():
         assert P(f"gate --protect-since {base}", repo, ok=False).returncode
 
 
+def fresh_repo(d):
+    repo = Path(d)
+    sh("git init -q -b main && git config user.email t@t && git config user.name t", repo)
+    (repo / "a.js").write_text("1\n")
+    commit(repo, "init")
+    sh(f"sh {KIT}/install.sh --dev .", repo)
+    cfg = json.loads((repo / ".pipeline/config.json").read_text())
+    cfg.update(gate=[{"name": "ok", "run": "true"}])
+    (repo / ".pipeline/config.json").write_text(json.dumps(cfg))
+    commit(repo, "kit")
+    return repo
+
+
+def test_seal_and_tag_install():
+    with tempfile.TemporaryDirectory() as d:
+        repo = fresh_repo(d)
+        assert "봉인 유지" in P("verify", repo).stdout
+        assert "# source: dev" in (repo / ".pipeline/kit/MANIFEST.sha256").read_text()
+        card = repo / ".pipeline/kit/roles/qa.md"
+        card.write_text(card.read_text() + "\n몰래 고침\n")
+        out = P("verify", repo, ok=False)
+        assert out.returncode and "변경됨: roles/qa.md" in out.stderr, out.stderr
+        assert "킷 복사본이 원본과 다릅니다" in P("gate", repo, ok=False).stderr
+        (repo / ".pipeline/kit/roles/extra.md").write_text("x")
+        assert "추가됨: roles/extra.md" in P("verify", repo, ok=False).stderr
+        # 태그에서 설치하면 그 태그의 내용과 출처가 봉인된다
+        sh(f"sh {KIT}/install.sh --ref v0.1.2 .", repo)
+        assert (repo / ".pipeline/kit/VERSION").read_text().strip() == "0.1.2"
+        assert "# source: v0.1.2" in (repo / ".pipeline/kit/MANIFEST.sha256").read_text()
+        assert not (repo / ".pipeline/kit/roles/extra.md").exists()
+
+
+def test_usage_append_only():
+    with tempfile.TemporaryDirectory() as d:
+        repo = fresh_repo(d)
+        run = P("init-run u", repo).stdout.strip()
+        usage = repo / run / "usage.jsonl"
+        usage.write_text('{"a": 1}\n')
+        commit(repo, "usage")
+        base = sh("git rev-parse HEAD", repo).stdout.strip()
+        usage.write_text('{"a": 1}\n{"b": 2}\n')
+        assert "gate 통과" in P(f"gate --protect-since {base}", repo).stdout
+        usage.write_text('{"a": 9}\n{"b": 2}\n')
+        assert P(f"gate --protect-since {base}", repo, ok=False).returncode
+
+
+def test_reviewers_are_forced_read_only():
+    with tempfile.TemporaryDirectory() as d:
+        repo = fresh_repo(d)
+        run = P("init-run r", repo).stdout.strip()
+        fake = Path(d) / "fakebin"
+        fake.mkdir()
+        log = Path(d) / "args.log"
+        (fake / "claude").write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+cat >/dev/null
+echo '{{"result":"판정: 승인","total_cost_usd":0.5,"usage":{{"input_tokens":3,"cache_read_input_tokens":7,"output_tokens":2}}}}'
+""")
+        (fake / "codex").write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+cat >/dev/null
+echo '{{"type":"turn.completed","usage":{{"input_tokens":5,"output_tokens":1}}}}'
+""")
+        for f in fake.iterdir():
+            f.chmod(0o755)
+        (repo / "q.md").write_text("검수")
+        env = f"PATH={fake}:$PATH "
+        sh(env + "python3 .pipeline/kit/bin/pipeline claude dev-reviewer --prompt-file q.md", repo)
+        args = log.read_text()
+        for flag in ("--tools Read,Grep,Glob", "--permission-mode dontAsk", "--strict-mcp-config"):
+            assert flag in args, (flag, args)
+        assert sh(env + "python3 .pipeline/kit/bin/pipeline claude developer --prompt-file q.md", repo, ok=False).returncode
+        sh(env + "python3 .pipeline/kit/bin/pipeline codex plan-reviewer --prompt-file q.md", repo)
+        assert "-s read-only" in log.read_text().splitlines()[-1]
+        recs = [json.loads(line) for line in (repo / run / "usage.jsonl").read_text().splitlines()]
+        assert [r["engine"] for r in recs] == ["claude", "codex"]
+        assert recs[0]["input_tokens"] == 10 and recs[0]["cost_usd"] == 0.5
+        assert "claude 호출 1회" in P("status", repo).stdout
+
+
 if __name__ == "__main__":
     test_mask()
     test_usage()
     test_gate_todo_checks()
+    test_seal_and_tag_install()
+    test_usage_append_only()
+    test_reviewers_are_forced_read_only()
     test_flow()
     print("ok: pipeline kit checks passed")
