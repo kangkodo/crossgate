@@ -2,9 +2,10 @@
 """Crossgate — AI 교차검수 파이프라인 CLI. 표준 라이브러리만 사용한다 (Python 3.9+).
 
 하위 명령:
-  init-run SLUG [--quick]        ai-log 실행 폴더를 만들고 현재 실행으로 지정
-  codex ROLE --prompt-file F     Codex 역할 호출 (검수 역할은 항상 읽기 전용)
-  claude ROLE --prompt-file F    Claude 검수 호출 (읽기 도구만, MCP 없음, 사용량 기록)
+  init-run SLUG [--route R]      ai-log 실행 폴더를 만들고 현재 실행으로 지정 (R: light|standard|full, 기본 full)
+  codex ROLE --prompt-file F     Codex 역할 호출 (검수 역할은 항상 읽기 전용). --effort 로 추론 강도 지정
+  claude ROLE --prompt-file F    Claude 검수 호출 (읽기 도구만, MCP 없음, 사용량 기록). --effort 로 추론 강도 지정
+  route R                        현재 실행의 등급을 올린다 (light → standard → full, 낮추기는 새 실행으로)
   verify                         설치된 킷 복사본이 봉인 그대로인지 확인
   gate [--protect-since REF]     고정층 검사 + 보호 경로 변경 검사
   verdict --stage S --verdict V  판정 한 줄 기록 + timeline.md 재생성
@@ -35,6 +36,10 @@ LABEL = {"READY": "READY", "APPROVED": "승인", "REJECTED": "반려", "BLOCKED"
          "PASSED": "PASSED", "FAILED": "FAILED", "ESCALATED": "사람 조정 요청"}
 REVIEW = {"APPROVED", "REJECTED", "PASSED", "FAILED", "BLOCKED"}
 READ_ONLY_ROLES = {"plan-reviewer", "wiki-reviewer", "dev-reviewer"}
+# 작업 등급. 가벼움은 스타일·문구·배치만, 보통은 설계가 확정된 동작 조정, 무거움은 기능 추가·삭제·계약·데이터(CROSSGATE.md 10장)
+ROUTES = {"light": {"stages": ["request", "dev"], "effort": {"developer": "low", "dev-reviewer": "low"}},
+          "standard": {"stages": ["request", "dev"]},
+          "full": {"stages": ["request", "plan", "dev", "qa", "wiki"]}}
 WRITE_ROLES = {"developer", "qa"}
 
 # ponytail: 정규식 마스킹이라 형식이 특이한 비밀은 놓칠 수 있다. 누락이 나오면 패턴을 늘리거나 gitleaks로 바꾼다.
@@ -119,6 +124,24 @@ def config():
     return cfg
 
 
+def route_conf(cfg, route):
+    """등급 설정: 기본값 위에 config.routes 를 덮는다. 0.4 이하 설정(required_stages·quick_stages)과 옛 실행의 "quick"도 읽는다."""
+    route = "standard" if route == "quick" else route
+    r = {**ROUTES[route], **cfg.get("routes", {}).get(route, {})}
+    legacy = {"full": "required_stages", "standard": "quick_stages"}.get(route)
+    if "routes" not in cfg and legacy in cfg:
+        r["stages"] = cfg[legacy]
+    return r
+
+
+def effort_for(cfg, run, role, engine, override=None):
+    """추론 강도: --effort > 이번 실행 등급의 effort > 엔진 설정의 역할별 값 > 엔진 기본값."""
+    route = json.loads((run / "meta.json").read_text(encoding="utf-8")).get("route", "full")
+    e = cfg.get(engine, {})
+    return (override or route_conf(cfg, route).get("effort", {}).get(role)
+            or e.get("effort", {}).get(role) or e.get("default_effort"))
+
+
 def is_pm(cfg):
     return cfg.get("mode") == "pm"
 
@@ -201,11 +224,25 @@ def cmd_init_run(a):
     for d in DIRS:
         (run / d).mkdir(parents=True)
     shutil.copy(KIT / "templates" / "request.md", run / "00-request" / "request.md")
-    meta = {"slug": slug, "route": "quick" if a.quick else "full",
+    meta = {"slug": slug, "route": "standard" if a.quick else a.route,
             "branch": git("rev-parse", "--abbrev-ref", "HEAD", check=False, cwd=r) or None, "created": now.isoformat(timespec="seconds")}
     (run / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (r / ".crossgate" / "current-run").write_text(str(run.relative_to(r)))
     print(run.relative_to(r))
+
+
+def cmd_route(a):
+    run = current_run(a.run)
+    f = run / "meta.json"
+    meta = json.loads(f.read_text(encoding="utf-8"))
+    order = list(ROUTES)
+    old = "standard" if meta["route"] == "quick" else meta["route"]
+    if order.index(a.route) <= order.index(old):
+        sys.exit(f"등급은 올리기만 한다({old} → {a.route} 불가). 낮추려면 사용자 확인 뒤 새 실행을 만든다.")
+    meta["route"] = a.route
+    meta.setdefault("promoted", []).append({"from": old, "to": a.route, "ts": dt.datetime.now().isoformat(timespec="seconds")})
+    f.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(f"등급 승격: {old} → {a.route}. 필수 단계: {', '.join(route_conf(config(), a.route)['stages'])}")
 
 
 def cmd_codex(a):
@@ -218,7 +255,7 @@ def cmd_codex(a):
     if is_pm(cfg) and sandbox == "workspace-write" and not repo:
         sys.exit("PM 모드의 개발·QA 역할은 --repo 가 필요합니다(쓰기를 저장소 하나로 제한).")
     c = cfg.get("codex", {})
-    effort = c.get("effort", {}).get(a.role, c.get("default_effort", "high"))
+    effort = effort_for(cfg, run, a.role, "codex", a.effort) or "high"
     task = Path(a.prompt_file).read_text(encoding="utf-8")
     prompt = "\n\n---\n\n".join([
         (KIT / "roles" / f"{a.role}.md").read_text(encoding="utf-8"),
@@ -311,6 +348,9 @@ def cmd_claude(a):
         f"# 이번 작업\n\n실행 기록 폴더: `{run.relative_to(r)}`\n\n{task}"])
     cmd = ["claude", "-p", "--model", model, "--tools", CLAUDE_TOOLS, "--permission-mode", "dontAsk",
            "--strict-mcp-config", "--no-session-persistence", "--output-format", "json"]
+    effort = effort_for(cfg, run, a.role, "claude", a.effort)
+    if effort:
+        cmd += ["--effort", effort]
     started = time.time()
     p = subprocess.run(cmd, input=prompt, text=True, capture_output=True, cwd=r)
     try:
@@ -322,7 +362,7 @@ def cmd_claude(a):
              "cached_input_tokens": u.get("cache_read_input_tokens") or 0, "output_tokens": u.get("output_tokens") or 0,
              "reasoning_output_tokens": 0, "cost_usd": out.get("total_cost_usd")}
     rec = {"ts": dt.datetime.now().isoformat(timespec="seconds"), "engine": "claude", "role": a.role, "model": model,
-           "seconds": round(time.time() - started), "exit": p.returncode, **usage}
+           "effort": effort, "seconds": round(time.time() - started), "exit": p.returncode, **usage}
     with open(run / "usage.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     stamp = dt.datetime.now().strftime("%H%M%S")
@@ -431,8 +471,7 @@ def cmd_merge_check(a):
     run = root() / runs[0]
     recs = load(run)
     meta = json.loads((run / "meta.json").read_text(encoding="utf-8"))
-    stages = cfg.get("quick_stages" if meta["route"] == "quick" else "required_stages",
-                     ["request", "plan", "dev", "qa", "wiki"])
+    stages = route_conf(cfg, meta["route"])["stages"]
     problems = []
     hit = [f for f in changed if not f.startswith("ai-log/") and match(f, cfg.get("forbidden", []))]
     if hit:
@@ -484,12 +523,15 @@ def cmd_clean_raw(a):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="crossgate", description=__doc__.split("\n")[0])
     sp = ap.add_subparsers(dest="cmd", required=True)
-    p = sp.add_parser("init-run"); p.add_argument("slug"); p.add_argument("--quick", action="store_true")
+    p = sp.add_parser("init-run"); p.add_argument("slug"); p.add_argument("--route", choices=list(ROUTES), default="full")
+    p.add_argument("--quick", action="store_true", help="0.4 이하 호환: --route standard")
     p.set_defaults(fn=cmd_init_run)
     p = sp.add_parser("codex"); p.add_argument("role"); p.add_argument("--prompt-file", required=True)
-    p.add_argument("--run"); p.add_argument("--repo"); p.set_defaults(fn=cmd_codex)
+    p.add_argument("--run"); p.add_argument("--repo"); p.add_argument("--effort"); p.set_defaults(fn=cmd_codex)
     p = sp.add_parser("claude"); p.add_argument("role"); p.add_argument("--prompt-file", required=True)
-    p.add_argument("--run"); p.set_defaults(fn=cmd_claude)
+    p.add_argument("--run"); p.add_argument("--effort"); p.set_defaults(fn=cmd_claude)
+    p = sp.add_parser("route"); p.add_argument("route", choices=list(ROUTES)); p.add_argument("--run")
+    p.set_defaults(fn=cmd_route)
     p = sp.add_parser("verify"); p.set_defaults(fn=cmd_verify)
     p = sp.add_parser("gate"); p.add_argument("--protect-since"); p.add_argument("--repo"); p.set_defaults(fn=cmd_gate)
     p = sp.add_parser("verdict")

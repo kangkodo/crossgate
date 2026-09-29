@@ -13,7 +13,16 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 
 1. 작업 트리가 깨끗한지 확인한다(`git status`). 사용자 변경이 있으면 건드리지 말고 먼저 묻는다.
 2. 기준 브랜치에서 작업 브랜치를 만든다: `git switch -c pipe/<slug>`.
-3. `$P init-run <slug>` (사용자가 "간단 수정"을 명시했을 때만 `--quick`). 출력된 폴더가 이번 실행 기록이다.
+3. 작업 등급을 정한다(CROSSGATE.md 10장). 근거 한 줄과 함께 추천하고 사용자가 확정한다. AskUserQuestion을 쓰면 추천 등급을 첫째에 둔다. 사용자가 이미 등급을 말했으면 다시 묻지 않는다.
+4. `$P init-run <slug> --route light|standard|full`. 출력된 폴더가 이번 실행 기록이다. 역할 호출의 추론 강도는 이 등급에서 정해진다.
+
+| 등급 | 거치는 절 |
+|---|---|
+| 가벼움 | 1(요청 한두 줄, 결정 목록은 `질문`이 있을 때만) → 3(TODO 없이, 전후 캡처 포함) → 6 |
+| 보통 | 1 → 2의 1번(TODO만, 검수 없음) → 3 → 6 |
+| 무거움 | 1 → 2 → 3 → 4 → 5 → 6 |
+
+진행 중 승격 조건(CROSSGATE.md 10장)에 걸리면 `$P route <올린 등급>`을 실행하고 사용자에게 알린 뒤, 건너뛴 절을 보충한다.
 
 ## 1. 요청 정리 (`request`)
 
@@ -23,7 +32,7 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 
 ## 2. 기획 (`plan`) — Claude 작성, Codex 검수
 
-기획 검수를 넣을지는 CROSSGATE.md 10장 기준을 따른다. 정식 모드는 사용자가 고른 경로대로 하고, 간단 수정이 맞아 보이면 기준을 들어 권한다. PM 모드는 Master가 정하고 판단 이유를 plan READY 비고에 적는다. 검수를 빼도 `todo.md`는 쓴다.
+무거움만 이 절 전체를 거친다. 보통은 1번(TODO 작성·커밋)만 하고 3으로 간다. 가벼움은 이 절을 건너뛴다.
 
 1. `roles/planner.md`대로 `01-planning/todo.md`, 수용 테스트, 영향 문서, 하지 않을 일을 작성한다. 커밋.
 2. `$P verdict --stage plan --verdict READY --actor claude`.
@@ -34,10 +43,10 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 ## 3. 개발 (`dev`) — Codex 작성, Claude 검수
 
 1. 기획 산출물을 모두 커밋한다. 이 커밋을 `BASE`로 기억한다.
-2. 작업 지시 파일(`02-development/task-N.md`)에 구현할 DEV 항목, 관련 파일, 이전 차단 지적을 적고: `$P codex developer --prompt-file <그 파일>`.
+2. 작업 지시 파일(`02-development/task-N.md`)에 구현할 DEV 항목, 관련 파일, 이전 차단 지적을 적고: `$P codex developer --prompt-file <그 파일>`. 가벼움은 DEV 항목 대신 바꿀 내용과 대상 파일을 직접 적는다(TODO 없음).
 3. `$P gate --protect-since BASE`. 보호 경로 변경이 나오면 그 변경을 되돌리고(`git checkout BASE -- <경로>`) 반려로 처리한다. 검사 실패도 LLM 검수 없이 바로 2로 돌아간다.
-4. 통과하면 커밋하고 `$P verdict --stage dev --verdict READY --actor codex`.
-5. `git diff BASE..HEAD > <run>/raw/dev-diff-N.patch` 를 만든다. 기획 검수를 건너뛴 실행이면 `request.md` 결정 목록도 읽을 것에 넣는다. 재검수면 이전 반려의 커밋(`$P status`에 표시)부터의 변경도 `git diff <그 커밋>..HEAD > <run>/raw/dev-delta-N.patch`로 만들고, 지시 파일에 이전 지적과 delta를 앞세운다(R14). 검수 지시 파일을 쓰고 `$P claude dev-reviewer --prompt-file <그 파일>`로 검수를 맡긴다. 이 명령은 읽기 도구만 켜고 MCP를 싣지 않아 읽기 전용이 기계로 강제되며 사용량·비용이 기록된다. `claude` 명령을 쓸 수 없는 환경에서만 Agent 도구로 `crossgate-reviewer` 서브에이전트에게 맡긴다. diff 경로, `todo.md`, 개발 루브릭, 이전 지적 ID를 넘긴다. 세션을 다른 폴더에서 시작해 `crossgate-reviewer`가 등록돼 있지 않으면, 읽기 전용 도구만 가진 에이전트(예: Explore)에 `.claude/agents/crossgate-reviewer.md` 본문을 그대로 지시로 넘기고, 판정 기록 비고에 대체 사실을 적는다.
+4. 통과하면 커밋하고 `$P verdict --stage dev --verdict READY --actor codex`. 가벼움은 여기서 바뀐 화면의 전후 캡처를 만든다(공유 스타일을 고쳤다면 그 스타일을 쓰는 대표 화면까지). 의도하지 않은 화면 변화가 보이면 승격한다.
+5. `git diff BASE..HEAD > <run>/raw/dev-diff-N.patch` 를 만든다. 보통이면 `request.md` 결정 목록도, 가벼움이면 전후 캡처 경로도 읽을 것에 넣는다. 재검수면 이전 반려의 커밋(`$P status`에 표시)부터의 변경도 `git diff <그 커밋>..HEAD > <run>/raw/dev-delta-N.patch`로 만들고, 지시 파일에 이전 지적과 delta를 앞세운다(R14). 검수 지시 파일을 쓰고 `$P claude dev-reviewer --prompt-file <그 파일>`로 검수를 맡긴다. 이 명령은 읽기 도구만 켜고 MCP를 싣지 않아 읽기 전용이 기계로 강제되며 사용량·비용이 기록된다. `claude` 명령을 쓸 수 없는 환경에서만 Agent 도구로 `crossgate-reviewer` 서브에이전트에게 맡긴다. diff 경로, `todo.md`, 개발 루브릭, 이전 지적 ID를 넘긴다. 세션을 다른 폴더에서 시작해 `crossgate-reviewer`가 등록돼 있지 않으면, 읽기 전용 도구만 가진 에이전트(예: Explore)에 `.claude/agents/crossgate-reviewer.md` 본문을 그대로 지시로 넘기고, 판정 기록 비고에 대체 사실을 적는다.
 6. 판정을 `$P verdict --stage dev ... --actor claude`로 기록한다. 반려면 2로 돌아간다.
 
 ## 4. 독립 QA (`qa`) — Codex

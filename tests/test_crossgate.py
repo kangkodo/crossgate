@@ -348,6 +348,71 @@ echo '{{"type":"turn.completed","usage":{{"input_tokens":5,"output_tokens":1}}}}
         assert "-s read-only" in last and f"-C {ws}" in last, last
 
 
+def test_routes_and_effort():
+    """등급별 필수 단계와 추론 강도. 가벼움은 request·dev만 보고, 개발·검수를 낮은 강도로 부른다."""
+    with tempfile.TemporaryDirectory() as d:
+        repo = fresh_repo(d)
+        fake = Path(d) / "fakebin"
+        fake.mkdir()
+        log = Path(d) / "args.log"
+        (fake / "claude").write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+cat >/dev/null
+echo '{{"result":"판정: 승인","usage":{{"input_tokens":1,"output_tokens":1}}}}'
+""")
+        (fake / "codex").write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+cat >/dev/null
+""")
+        for f in fake.iterdir():
+            f.chmod(0o755)
+        (repo / "q.md").write_text("x")
+        env = f"PATH={fake}:$PATH "
+        cli = env + "python3 .crossgate/kit/bin/crossgate "
+
+        sh("git switch -qc pipe/light", repo)
+        run = P("init-run 여백 --route light", repo).stdout.strip()
+        assert json.loads((repo / run / "meta.json").read_text())["route"] == "light"
+        sh(cli + "codex developer --prompt-file q.md", repo)
+        assert "model_reasoning_effort=low" in log.read_text().splitlines()[-1]
+        sh(cli + "claude dev-reviewer --prompt-file q.md", repo)
+        assert "--effort low" in log.read_text().splitlines()[-1]
+        sh(cli + "codex developer --effort medium --prompt-file q.md", repo)
+        assert "model_reasoning_effort=medium" in log.read_text().splitlines()[-1], "--effort가 등급보다 우선"
+        (repo / "a.js").write_text("2\n")
+        commit(repo, "light")
+        P("verdict --stage request --verdict APPROVED", repo)
+        P("verdict --stage dev --verdict APPROVED", repo)
+        commit(repo, "log")
+        assert "request, dev" in P("merge-check --base main", repo).stdout
+        # 승격은 올리기만. 올리면 필수 단계가 늘어 병합 조건도 바뀐다
+        assert P("route light", repo, ok=False).returncode
+        assert "standard → full" not in P("route standard", repo).stdout
+        P("route full", repo)
+        meta = json.loads((repo / run / "meta.json").read_text())
+        assert meta["route"] == "full" and [x["to"] for x in meta["promoted"]] == ["standard", "full"]
+        commit(repo, "promote")
+        assert "plan: 최종 판정" in P("merge-check --base main", repo, ok=False).stdout
+
+        run_q = P("init-run 옛날식 --quick", repo).stdout.strip()
+        assert json.loads((repo / run_q / "meta.json").read_text())["route"] == "standard", "--quick = standard"
+
+        # 무거움(기본)은 설정의 역할별 강도를 쓰고, Claude 검수에는 강도를 붙이지 않는다
+        run = P("init-run 기능", repo).stdout.strip()
+        sh(cli + "codex plan-reviewer --prompt-file q.md", repo)
+        assert "model_reasoning_effort=xhigh" in log.read_text().splitlines()[-1]
+        sh(cli + "claude dev-reviewer --prompt-file q.md", repo)
+        assert "--effort" not in log.read_text().splitlines()[-1]
+
+    mod = importlib.machinery.SourceFileLoader("crossgate", str(KIT / "bin" / "crossgate")).load_module()
+    # 0.4 이하 설정과 옛 실행("quick")도 그대로 읽는다
+    old = {"required_stages": ["request", "dev"], "quick_stages": ["request", "dev", "qa"]}
+    assert mod.route_conf(old, "quick")["stages"] == ["request", "dev", "qa"]
+    assert mod.route_conf(old, "full")["stages"] == ["request", "dev"]
+    assert mod.route_conf({}, "full")["stages"] == ["request", "plan", "dev", "qa", "wiki"]
+    assert mod.route_conf({"routes": {"light": {"effort": {}}}}, "light")["stages"] == ["request", "dev"]
+
+
 if __name__ == "__main__":
     test_mask()
     test_usage()
@@ -358,5 +423,6 @@ if __name__ == "__main__":
     test_usage_append_only()
     test_reviewers_are_forced_read_only()
     test_workspace_pm_mode()
+    test_routes_and_effort()
     test_flow()
     print("ok: crossgate checks passed")
