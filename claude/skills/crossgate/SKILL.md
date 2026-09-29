@@ -17,17 +17,36 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 
 ## 1. 요청 정리 (`request`)
 
-1. 대화를 바탕으로 `00-request/request.md`를 채운다.
-2. "AI가 새로 가정한 것"이 있으면 **그것만** 사용자에게 묻는다. 사용자가 이미 말한 내용은 다시 묻지 않는다.
-3. 답을 "사용자 확인 기록"에 적고 커밋한 뒤 `$P verdict --stage request --verdict APPROVED --actor user --note "<가정 N건 확인 / 가정 없음>"`.
+기준은 질문 수가 아니라 "사용자가 정할 결정을 AI가 대신 고르지 않았는가"다. 뒤에 기획 검수가 있다고 이 단계를 덜 하지 않는다. 늦게 드러난 결정은 반려·상한·사용자 대기로 돌아온다.
+
+1. 대화를 바탕으로 `00-request/request.md`의 목표·요구·하지 않을 일을 채운다.
+2. **결정 목록을 먼저 빠짐없이 만든다.** 이번 작업이 건드리는 대상(데이터, 화면, 사용자 유형, 외부 시스템)을 적고, 대상마다 그리고 대상끼리 만나는 곳마다 아래 관점으로 답해야 할 결정을 뽑는다. 목록 만들기는 넓게, 질문은 좁게 한다.
+   - 구조: 개수·관계·식별 (하나인가 여럿인가)
+   - 동작: 생성→변경→종료, 동시에 일어날 때, 실패·예외. 두 개념이 만나는 곳("취소 가능" + "결제 있음" → 취소하면 결제는?)
+   - 기술: 저장·전달 방식, 일관성
+   - 계약: 상태값 집합, 고유성, 응답 필드, 기존 계약·이전 버전과의 호환
+   - 완료 증명: 무엇을 어디까지 확인하면 끝인가. "문제없게"처럼 엄격함이 요구되면 검증 범위도 사용자 결정이다
+   관점에 맞지 않는 중요한 결정이 보이면 관점을 늘린다. 입력이 짧을수록 더 넓게 찾는다.
+3. 결정마다 이 순서로 처리를 정해 목록에 적는다.
+   1. 사용자가 말했거나, 목표·제약·코드 사실에서 도출된다 → `사용자` / `도출` (근거를 적는다). 묻지 않는다.
+   2. 이미 정해진 방식 안의 조정값이고 사용자가 선호를 가질 이유가 없다 → `조정값` (기본값을 적는다). 묻지 않는다.
+   3. 둘 다 아니다 → `질문`. AI가 고르면 추측이다.
+   중요한 관점이 이번 작업에 해당하지 않으면 `해당 없음`과 이유를 남긴다. 조용히 빼지 않는다.
+4. `질문`만 묻는다. 어디에 해당하는지, 왜 아직 정해지지 않았는지, 정하지 않으면 무엇이 달라지는지를 댈 수 있어야 질문이다. 영향이 큰 것부터 한 번에 몇 개씩 묻는다.
+   - 추천안을 먼저 낸다. 기술 결정은 선택지·장단점·추천을 보인다. 제품·업무 규칙은 구체안과 함께 "다른 생각이 있다"는 열린 선택지를 둔다(답은 사용자가 안다).
+   - 선택지가 있으면 AskUserQuestion(선택지 2~4개, 추천을 첫째에)을 쓰고, 열린 질문은 글로 묻는다.
+5. 답을 결정 목록과 "사용자 확인 기록"에 적는다. 답이 다른 결정을 건드리면 그 주변만 한 번 다시 훑는다. 사용자가 결정을 미루면 그대로 적고, 그 결정에 기대는 일은 범위에서 뺀다.
+6. `질문`이 모두 답을 받았으면 커밋하고 `$P verdict --stage request --verdict APPROVED --actor user --note "<결정 N건 중 질문 M건 / 질문 없음>"`.
 
 ## 2. 기획 (`plan`) — Claude 작성, Codex 검수
 
+기획 검수를 넣을지는 CROSSGATE.md 10장 기준을 따른다. 정식 모드는 사용자가 고른 경로대로 하고, 간단 수정이 맞아 보이면 기준을 들어 권한다. PM 모드는 Master가 정하고 판단 이유를 plan READY 비고에 적는다. 검수를 빼도 `todo.md`는 쓴다.
+
 1. `roles/planner.md`대로 `01-planning/todo.md`, 수용 테스트, 영향 문서, 하지 않을 일을 작성한다. 커밋.
 2. `$P verdict --stage plan --verdict READY --actor claude`.
-3. 검수 요청 파일(`01-planning/review-request-N.md`)에 대상 파일 목록과 이전 지적 ID를 적고: `$P codex plan-reviewer --prompt-file <그 파일>`.
+3. 검수 요청 파일(`01-planning/review-request-N.md`)에 대상 파일 목록을 적는다. 재검수면 이전 지적(ID·위치·기대)과 바뀐 항목(DEV ID·절)만 추려 적는다(CROSSGATE.md R14). 그다음 `$P codex plan-reviewer --prompt-file <그 파일>`.
 4. 응답 첫 줄을 파싱해 기록한다: `$P verdict --stage plan --verdict APPROVED|REJECTED|BLOCKED --actor codex --model gpt-6-astra --issues "P-1=open,..." [--unverified ...] --note "<요약>"`.
-5. 반려면 지적을 반영하고 2로 돌아간다. 요구 오류면 사용자에게 새 가정으로 묻는다. `verdict` 출력에 "조정 필요"가 나오면 7번으로 간다.
+5. 반려면 지적을 반영하고 2로 돌아간다. 요구 오류나 결정 근거(⑥) 지적은 Master가 기본값으로 메우지 않는다. 1단계 4번 방식으로 사용자에게 묻고 답을 request.md에 적은 뒤 기획을 고친다. `verdict` 출력에 "조정 필요"가 나오면 7번으로 간다.
 
 ## 3. 개발 (`dev`) — Codex 작성, Claude 검수
 
@@ -35,7 +54,7 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 2. 작업 지시 파일(`02-development/task-N.md`)에 구현할 DEV 항목, 관련 파일, 이전 차단 지적을 적고: `$P codex developer --prompt-file <그 파일>`.
 3. `$P gate --protect-since BASE`. 보호 경로 변경이 나오면 그 변경을 되돌리고(`git checkout BASE -- <경로>`) 반려로 처리한다. 검사 실패도 LLM 검수 없이 바로 2로 돌아간다.
 4. 통과하면 커밋하고 `$P verdict --stage dev --verdict READY --actor codex`.
-5. `git diff BASE..HEAD > <run>/raw/dev-diff-N.patch` 를 만든 뒤 검수 지시 파일을 쓰고 `$P claude dev-reviewer --prompt-file <그 파일>`로 검수를 맡긴다. 이 명령은 읽기 도구만 켜고 MCP를 싣지 않아 읽기 전용이 기계로 강제되며 사용량·비용이 기록된다. `claude` 명령을 쓸 수 없는 환경에서만 Agent 도구로 `crossgate-reviewer` 서브에이전트에게 맡긴다. diff 경로, `todo.md`, 개발 루브릭, 이전 지적 ID를 넘긴다. 세션을 다른 폴더에서 시작해 `crossgate-reviewer`가 등록돼 있지 않으면, 읽기 전용 도구만 가진 에이전트(예: Explore)에 `.claude/agents/crossgate-reviewer.md` 본문을 그대로 지시로 넘기고, 판정 기록 비고에 대체 사실을 적는다.
+5. `git diff BASE..HEAD > <run>/raw/dev-diff-N.patch` 를 만든다. 기획 검수를 건너뛴 실행이면 `request.md` 결정 목록도 읽을 것에 넣는다. 재검수면 이전 반려의 커밋(`$P status`에 표시)부터의 변경도 `git diff <그 커밋>..HEAD > <run>/raw/dev-delta-N.patch`로 만들고, 지시 파일에 이전 지적과 delta를 앞세운다(R14). 검수 지시 파일을 쓰고 `$P claude dev-reviewer --prompt-file <그 파일>`로 검수를 맡긴다. 이 명령은 읽기 도구만 켜고 MCP를 싣지 않아 읽기 전용이 기계로 강제되며 사용량·비용이 기록된다. `claude` 명령을 쓸 수 없는 환경에서만 Agent 도구로 `crossgate-reviewer` 서브에이전트에게 맡긴다. diff 경로, `todo.md`, 개발 루브릭, 이전 지적 ID를 넘긴다. 세션을 다른 폴더에서 시작해 `crossgate-reviewer`가 등록돼 있지 않으면, 읽기 전용 도구만 가진 에이전트(예: Explore)에 `.claude/agents/crossgate-reviewer.md` 본문을 그대로 지시로 넘기고, 판정 기록 비고에 대체 사실을 적는다.
 6. 판정을 `$P verdict --stage dev ... --actor claude`로 기록한다. 반려면 2로 돌아간다.
 
 ## 4. 독립 QA (`qa`) — Codex
@@ -48,7 +67,7 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 ## 5. Wiki (`wiki`) — Claude 작성, Codex 검수
 
 1. `roles/wiki-writer.md`대로 영향 문서를 갱신하고 `04-wiki/summary.md`를 쓴다. 커밋. READY 기록.
-2. `$P codex wiki-reviewer --prompt-file <지시 파일>`로 검수를 받고 판정을 기록한다.
+2. `$P codex wiki-reviewer --prompt-file <지시 파일>`로 검수를 받고 판정을 기록한다. 재검수면 이전 지적과 바뀐 문서·절만 추려 넣는다(R14).
 
 ## 6. 병합
 
@@ -84,3 +103,4 @@ description: Crossgate(AI 교차검수 개발 파이프라인)의 Master 플레�
 - 사용자에게 보여주는 메시지에 비밀값을 넣지 않는다. raw는 저장할 때 마스킹된다.
 - 단계마다 짧게 진행 상황을 알린다: 무엇을 했고, 판정이 무엇이고, 다음이 무엇인지.
 - `$P status`로 언제든 현재 상태를 확인할 수 있다.
+- 모든 지시 파일은 `## 읽을 것`으로 시작한다: 대상 파일, 관련 문서의 경로·절(예: `docs/api.md#인증`), 이전 산출물(request, todo, diff, 이전 지적). 역할 AI가 문서 색인이나 인수인계 문서부터 탐색하느라 턴을 쓰지 않게, Master가 이미 아는 것은 목록으로 넘긴다.
