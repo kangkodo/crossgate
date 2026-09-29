@@ -139,4 +139,5 @@ if remote:
     local["kit_remote"] = remote
 (base / "local.json").write_text(json.dumps(local, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
+[ "$WS" = 1 ] && echo "참고: PM 모드에는 스킬이 없습니다. 작업공간 규칙(AGENTS.md 등)에서 .crossgate/kit/CROSSGATE.md 를 가리켜야 Master가 요청 정리·재검수·읽을 것 규칙을 읽습니다."
 echo "설치 완료: crossgate $VERSION [$SOURCE] → $DEST (봉인: .crossgate/kit/MANIFEST.sha256)"

@@ -35,7 +35,7 @@ git이 아닌 루트 아래 저장소가 여러 개이고 자체 작업 절차�
 sh ~/Documents/projects/crossgate/install.sh --workspace <작업공간 루트>
 ```
 
-`config.json`의 `repos`에 저장소별 `gate`·`protected`를 적고, `codex`·`gate`·`verdict`에 `--repo`를 준다(CROSSGATE.md 11절).
+`config.json`의 `repos`에 저장소별 `gate`·`protected`를 적고, `codex`·`gate`·`verdict`에 `--repo`를 준다(CROSSGATE.md 11절). 스킬이 설치되지 않으므로 작업공간 규칙(AGENTS.md 등)에서 `.crossgate/kit/CROSSGATE.md`를 가리킨다.
 
 ## 전역 스킬 (한 번만)
 
