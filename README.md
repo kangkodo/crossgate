@@ -1,6 +1,6 @@
 # Crossgate
 
-**Crossgate**는 AI 교차검수 개발 파이프라인의 실행 키트다. 이름은 cross(서로 다른 모델의 교차 검수)와 gate(단계마다 승인받아야 통과하는 관문)에서 왔다. 설계 원본은 `../crossgate-spec`(명세 v1.13)이다.
+**Crossgate**는 AI 교차검수 개발 파이프라인의 실행 키트다. 이름은 cross(서로 다른 모델의 교차 검수)와 gate(단계마다 승인받아야 통과하는 관문)에서 왔다. 설계 원본은 `../crossgate-spec`(명세 v1.13.1)이다.
 
 - 사용자는 Master(Claude)하고만 대화한다. Master가 Codex(`gpt-6-astra`)를 역할별로 호출한다.
 - 기본 배치: 기획·Wiki는 Claude가 쓰고 Codex가 검수한다. 개발은 Codex가 하고 Claude가 검수한다. QA는 Codex가 한다.

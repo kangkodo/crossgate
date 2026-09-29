@@ -227,7 +227,14 @@ def cmd_init_run(a):
     meta = {"slug": slug, "route": "standard" if a.quick else a.route,
             "branch": git("rev-parse", "--abbrev-ref", "HEAD", check=False, cwd=r) or None, "created": now.isoformat(timespec="seconds")}
     (run / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    (r / ".crossgate" / "current-run").write_text(str(run.relative_to(r)))
+    cur = r / ".crossgate" / "current-run"
+    prev = r / cur.read_text().strip() if cur.exists() else None
+    if prev and prev.is_dir():
+        idle = (time.time() - max(f.stat().st_mtime for f in prev.iterdir() if f.is_file())) / 60
+        if idle < RECENT_MIN:
+            print(f"주의: 현재 실행 {prev.name}이(가) {idle:.0f}분 전에 쓰였다. 다른 세션이 쓰는 중이면 그 세션의 기록이 "
+                  f"이 새 실행으로 섞인다. 모든 명령에 --run 을 붙인다.", file=sys.stderr)
+    cur.write_text(str(run.relative_to(r)))
     print(run.relative_to(r))
 
 
@@ -254,6 +261,12 @@ def cmd_codex(a):
     repo = repo_dir(cfg, a.repo)
     if is_pm(cfg) and sandbox == "workspace-write" and not repo:
         sys.exit("PM 모드의 개발·QA 역할은 --repo 가 필요합니다(쓰기를 저장소 하나로 제한).")
+    if not is_pm(cfg) and sandbox == "workspace-write":
+        dirty = [l for l in git("status", "--porcelain", "--", "ai-log", strip=False, cwd=r).splitlines()
+                 if l.strip() and "/raw/" not in l and "/03-qa/captures/" not in l and not l.rstrip().endswith("usage.jsonl")]
+        if dirty:
+            sys.exit("ai-log에 커밋하지 않은 변경이 있습니다. 지시 파일까지 커밋한 뒤 부르고, 그 커밋을 gate --protect-since 에 줍니다"
+                     "(아니면 gate가 Master의 파일을 보호 경로 위반으로 잡는다).\n" + "\n".join(dirty[:5]))
     c = cfg.get("codex", {})
     effort = effort_for(cfg, run, a.role, "codex", a.effort) or "high"
     task = Path(a.prompt_file).read_text(encoding="utf-8")
@@ -292,6 +305,7 @@ def cmd_codex(a):
         sys.exit(p.returncode)
 
 
+RECENT_MIN = 60  # ponytail: 활동 여부를 파일 시각으로만 본다. 세션별 실행 지정이 필요해지면 CROSSGATE_RUN 같은 명시적 바인딩으로 바꾼다
 TODO_FILE = "ai-log/*/01-planning/todo.md"
 USAGE_FILE = "ai-log/*/usage.jsonl"
 
@@ -427,7 +441,7 @@ def cmd_verdict(a):
     with open(run / "verdicts.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     write_timeline(run)
-    print(f"기록: {a.stage} #{attempt} {LABEL[a.verdict]} @ {at(rec)}")
+    print(f"기록: {a.stage} #{attempt} {LABEL[a.verdict]} @ {at(rec)} → {run.name}")
     esc = escalation(load(run), a.stage, cfg.get("cap", 3))
     if esc:
         print(f"조정 필요: {esc}. ESCALATED를 기록하고 사용자에게 묻습니다.")

@@ -373,6 +373,10 @@ cat >/dev/null
         sh("git switch -qc pipe/light", repo)
         run = P("init-run 여백 --route light", repo).stdout.strip()
         assert json.loads((repo / run / "meta.json").read_text())["route"] == "light"
+        # 지시 파일(실행 기록)을 커밋하지 않고 개발 역할을 부르면 멈춘다(gate 오탐 방지)
+        out = sh(cli + "codex developer --prompt-file q.md", repo, ok=False)
+        assert out.returncode and "커밋하지 않은 변경" in out.stderr, out.stderr
+        commit(repo, "run")
         sh(cli + "codex developer --prompt-file q.md", repo)
         assert "model_reasoning_effort=low" in log.read_text().splitlines()[-1]
         sh(cli + "claude dev-reviewer --prompt-file q.md", repo)
@@ -382,7 +386,7 @@ cat >/dev/null
         (repo / "a.js").write_text("2\n")
         commit(repo, "light")
         P("verdict --stage request --verdict APPROVED", repo)
-        P("verdict --stage dev --verdict APPROVED", repo)
+        assert Path(run).name in P("verdict --stage dev --verdict APPROVED", repo).stdout, "판정이 들어간 실행을 보여 준다"
         commit(repo, "log")
         assert "request, dev" in P("merge-check --base main", repo).stdout
         # 승격은 올리기만. 올리면 필수 단계가 늘어 병합 조건도 바뀐다
@@ -394,7 +398,9 @@ cat >/dev/null
         commit(repo, "promote")
         assert "plan: 최종 판정" in P("merge-check --base main", repo, ok=False).stdout
 
-        run_q = P("init-run 옛날식 --quick", repo).stdout.strip()
+        out = P("init-run 옛날식 --quick", repo)
+        run_q = out.stdout.strip()
+        assert "주의: 현재 실행" in out.stderr and "--run" in out.stderr, "최근에 쓰인 실행을 바꿀 때 알린다"
         assert json.loads((repo / run_q / "meta.json").read_text())["route"] == "standard", "--quick = standard"
 
         # 무거움(기본)은 설정의 역할별 강도를 쓰고, Claude 검수에는 강도를 붙이지 않는다
