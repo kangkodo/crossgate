@@ -163,6 +163,9 @@ def test_seal_and_tag_install():
         repo = fresh_repo(d)
         assert "봉인 유지" in P("verify", repo).stdout
         assert "# source: dev" in (repo / ".crossgate/kit/MANIFEST.sha256").read_text()
+        want = (KIT / "VERSION").read_text().strip()
+        assert json.loads((repo / ".crossgate/config.json").read_text())["kit_version"] == want, "설치기가 kit_version을 맞춘다"
+        assert "경고: config kit_version" not in P("gate", repo).stderr
         card = repo / ".crossgate/kit/roles/qa.md"
         card.write_text(card.read_text() + "\n몰래 고침\n")
         out = P("verify", repo, ok=False)

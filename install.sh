@@ -125,12 +125,14 @@ fi
 fi
 # 이 컴퓨터에서 원본이 어디 있는지 기록한다(업그레이드 때 씀). 컴퓨터마다 다르고 개인 경로가 들어가므로
 # git이 무시하는 .crossgate/local.json 에만 둔다. 0.2.1이 config.json에 넣은 값은 여기로 옮긴다.
-python3 - "$DEST/.crossgate" "$KIT" "$(git -C "$KIT" remote get-url origin 2>/dev/null || true)" <<'PY'
+# config의 kit_version 은 설치한 버전으로 맞춘다(템플릿 값이나 업그레이드 전 값이 남지 않게).
+python3 - "$DEST/.crossgate" "$KIT" "$(git -C "$KIT" remote get-url origin 2>/dev/null || true)" "$VERSION" <<'PY'
 import json, sys
 from pathlib import Path
-base, kit, remote = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+base, kit, remote, version = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
 cfg = base / "config.json"
 c = json.loads(cfg.read_text(encoding="utf-8"))
+c["kit_version"] = version
 c.pop("kit_source", None)
 c.pop("kit_remote", None)
 cfg.write_text(json.dumps(c, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
