@@ -433,8 +433,17 @@ def cmd_verdict(a):
     submissions = [x for x in recs if x["stage"] == a.stage and x["verdict"] == "READY"]
     attempt = a.attempt or (len(submissions) + (1 if a.verdict == "READY" else 0)) or 1
     issues = dict(kv.split("=", 1) for kv in a.issues.split(",")) if a.issues else {}
+    model = a.model
+    # 검수 판정의 모델은 그 엔진의 마지막 호출 기록에서 채운다. 손으로 적은 값이 다르면 알린다
+    if a.verdict in REVIEW and a.actor in ("claude", "codex") and (run / "usage.jsonl").exists():
+        used = [json.loads(l) for l in (run / "usage.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+        last = next((u["model"] for u in reversed(used) if u.get("engine", "codex") == a.actor), None)
+        if last and not model:
+            model = last
+        elif last and model != last:
+            print(f"주의: --model {model} 이 마지막 {a.actor} 호출의 모델 {last} 과 다르다. 그대로 기록한다.", file=sys.stderr)
     rec = {"ts": dt.datetime.now().isoformat(timespec="seconds"), "stage": a.stage, "attempt": attempt,
-           "verdict": a.verdict, "actor": a.actor, "model": a.model,
+           "verdict": a.verdict, "actor": a.actor, "model": model,
            "commit": git("rev-parse", "HEAD", cwd=repo) if versioned else None, "repo": a.repo,
            "issues": issues, "unverified": a.unverified or [], "evidence": a.evidence or [],
            "tokens": a.tokens, "note": a.note}
