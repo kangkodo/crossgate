@@ -118,6 +118,8 @@ if ! grep -q "# crossgate" "$DEST/.gitignore"; then
 fi
 # 이전 버전 설치본에는 local.json 줄이 없다
 grep -q "^.crossgate/local.json$" "$DEST/.gitignore" || printf '.crossgate/local.json\n' >> "$DEST/.gitignore"
+# 문서를 Obsidian으로 볼 때 생기는 설정 폴더가 승인 기록(커밋되지 않은 변경 검사)을 막지 않게
+grep -q "^.obsidian/$" "$DEST/.gitignore" || printf '.obsidian/\n' >> "$DEST/.gitignore"
 
 if [ ! -f "$DEST/.github/workflows/crossgate.yml" ]; then
   echo "참고: CI 검사는 templates/crossgate.yml 을 .github/workflows/ 에 복사해서 켭니다(대상 브랜치 확인 후)."

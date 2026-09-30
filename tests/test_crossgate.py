@@ -279,6 +279,7 @@ def test_setup_skill_and_kit_source():
         cfg = json.loads((repo / ".crossgate/config.json").read_text())
         assert "kit_source" not in cfg and "kit_remote" not in cfg, "개인 경로는 커밋 대상 설정에 넣지 않는다"
         assert json.loads((repo / ".crossgate/local.json").read_text())["kit_source"] == str(KIT)
+        assert ".obsidian/" in (repo / ".gitignore").read_text().splitlines(), "편집기 설정 폴더는 git에서 뺀다"
         assert sh("git check-ignore -q .crossgate/local.json && echo ignored", repo).stdout.strip() == "ignored"
         # 0.2.1이 config.json에 넣은 값은 재설치 때 local.json으로 옮겨진다
         cfg["kit_source"] = "/old/path"; cfg["kit_remote"] = "x"
