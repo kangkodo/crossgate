@@ -302,7 +302,9 @@ def test_workspace_pm_mode():
             commit(r, "init")
         (ws / "AGENTS.md").write_text("기존 규칙\n")
         sh(f"sh {KIT}/install.sh --dev --workspace .", ws)
-        assert not (ws / ".claude").exists() and (ws / "AGENTS.md").read_text() == "기존 규칙\n", "작업공간 규칙은 건드리지 않는다"
+        assert (ws / "AGENTS.md").read_text() == "기존 규칙\n", "작업공간 규칙은 건드리지 않는다"
+        assert (ws / ".claude/skills/crossgate/SKILL.md").exists(), "PM 모드에도 /crossgate 스킬을 깐다"
+        assert not (ws / ".gitignore").exists()
         assert (ws / ".crossgate/local.json").exists()
         cfg = json.loads((ws / ".crossgate/config.json").read_text())
         assert cfg["mode"] == "pm"
@@ -347,9 +349,14 @@ echo '{{"type":"turn.completed","usage":{{"input_tokens":5,"output_tokens":1}}}}
         last = log.read_text().splitlines()[-1]
         assert "-s workspace-write" in last and f"-C {ws / 'web'}" in last, last
         assert "작업 저장소: `web`" in (Path(d) / "prompt.txt").read_text()
-        sh(env + "python3 .crossgate/kit/bin/crossgate codex plan-reviewer --prompt-file q.md", ws)
+        out = sh(env + "python3 .crossgate/kit/bin/crossgate codex plan-reviewer --prompt-file q.md", ws)
         last = log.read_text().splitlines()[-1]
         assert "-s read-only" in last and f"-C {ws}" in last, last
+        assert "요청 단계 승인이 없다" in out.stderr, "요청 승인 없이 기획 검수를 부르면 알린다"
+        sh(env + "python3 .crossgate/kit/bin/crossgate codex request-reviewer --prompt-file q.md", ws)
+        assert "-s read-only" in log.read_text().splitlines()[-1], "요청 검수는 읽기 전용"
+        P("verdict --stage request --verdict APPROVED --actor user", ws)
+        assert "요청 단계 승인이 없다" not in sh(env + "python3 .crossgate/kit/bin/crossgate codex plan-reviewer --prompt-file q.md", ws).stderr
 
 
 def test_routes_and_effort():

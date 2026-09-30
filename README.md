@@ -1,6 +1,6 @@
 # Crossgate
 
-**Crossgate**는 AI 교차검수 개발 파이프라인의 실행 키트다. 이름은 cross(서로 다른 모델의 교차 검수)와 gate(단계마다 승인받아야 통과하는 관문)에서 왔다. 설계 원본은 `../crossgate-spec`(명세 v1.13.3)이다.
+**Crossgate**는 AI 교차검수 개발 파이프라인의 실행 키트다. 이름은 cross(서로 다른 모델의 교차 검수)와 gate(단계마다 승인받아야 통과하는 관문)에서 왔다. 설계 원본은 `../crossgate-spec`(명세 v1.14)이다.
 
 - 사용자는 Master(Claude)하고만 대화한다. Master가 Codex(`gpt-6-astra`)를 역할별로 호출한다.
 - 기본 배치: 기획·Wiki는 Claude가 쓰고 Codex가 검수한다. 개발은 Codex가 하고 Claude가 검수한다. QA는 Codex가 한다.
@@ -12,7 +12,7 @@
 | 경로 | 내용 |
 |---|---|
 | `CROSSGATE.md` | 실행용 규칙 (판정, 루브릭, 응답 형식, 상한, 병합·배포) |
-| `roles/` | 역할 카드 8장 |
+| `roles/` | 역할 카드 9장 |
 | `templates/` | request, todo, 프로젝트 설정(`config.json`), CI 검사, AGENTS/CLAUDE 안내, .gitignore 항목 |
 | `bin/crossgate` | CLI: `init-run`, `codex`, `gate`, `verdict`, `status`, `merge-check`, `deploy`, `clean-raw` |
 | `claude/` | `/crossgate` 스킬(Master 플레이북), `crossgate-reviewer` 서브에이전트 |
@@ -29,13 +29,13 @@ sh ~/Documents/projects/crossgate/install.sh <프로젝트 경로>
 
 ### 작업공간(PM 모드)
 
-git이 아닌 루트 아래 저장소가 여러 개이고 자체 작업 절차가 있으면 엔진만 설치한다.
+git이 아닌 루트 아래 저장소가 여러 개이고 자체 작업 절차가 있으면 PM 모드로 설치한다. 엔진과 `/crossgate` 스킬을 깔고, 작업공간 규칙·`.gitignore`·CI는 건드리지 않는다.
 
 ```bash
 sh ~/Documents/projects/crossgate/install.sh --workspace <작업공간 루트>
 ```
 
-`config.json`의 `repos`에 저장소별 `gate`·`protected`를 적고, `codex`·`gate`·`verdict`에 `--repo`를 준다(CROSSGATE.md 11절). 스킬이 설치되지 않으므로 작업공간 규칙(AGENTS.md 등)에서 `.crossgate/kit/CROSSGATE.md`를 가리킨다.
+`config.json`의 `repos`에 저장소별 `gate`·`protected`를 적고, `codex`·`gate`·`verdict`에 `--repo`를 준다(CROSSGATE.md 11절). 루트에서 연 세션에서 `/crossgate`를 부르면 Master가 된다. 작업공간 규칙이 우선하고, 규칙이 정하지 않은 요청 정리·등급·재검수는 스킬을 따른다. 작업공간 규칙(AGENTS.md 등)에서 `/crossgate`와 `.crossgate/kit/CROSSGATE.md`를 가리킨다.
 
 ## 전역 스킬 (한 번만)
 

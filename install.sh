@@ -76,12 +76,10 @@ fi
 rm -rf "$DEST/.crossgate/kit"
 mkdir -p "$DEST/.crossgate/kit"
 cp -R "$SRC/CROSSGATE.md" "$SRC/VERSION" "$SRC/roles" "$SRC/templates" "$SRC/bin" "$DEST/.crossgate/kit/"
-# 작업공간(PM 모드)은 절차를 작업공간 규칙이 맡는다. 엔진만 깔고 스킬·안내 단락·.gitignore·CI는 건드리지 않는다.
-if [ "$WS" = 0 ]; then
-  mkdir -p "$DEST/.claude/skills/crossgate" "$DEST/.claude/agents"
-  cp "$SRC/claude/skills/crossgate/SKILL.md" "$DEST/.claude/skills/crossgate/SKILL.md"
-  cp "$SRC/claude/agents/crossgate-reviewer.md" "$DEST/.claude/agents/crossgate-reviewer.md"
-fi
+# /crossgate 스킬과 검수 에이전트는 두 모드 모두 깐다. 작업공간(PM 모드)은 안내 단락·.gitignore·CI를 건드리지 않는다.
+mkdir -p "$DEST/.claude/skills/crossgate" "$DEST/.claude/agents"
+cp "$SRC/claude/skills/crossgate/SKILL.md" "$DEST/.claude/skills/crossgate/SKILL.md"
+cp "$SRC/claude/agents/crossgate-reviewer.md" "$DEST/.claude/agents/crossgate-reviewer.md"
 # 봉인은 설치기가 직접 쓴다(옛 태그의 CLI에는 verify가 없을 수 있음). 형식은 bin/crossgate의 verify_kit과 같다.
 python3 - "$DEST/.crossgate/kit" "$SOURCE" <<'PY'
 import hashlib, sys
@@ -143,5 +141,5 @@ if remote:
     local["kit_remote"] = remote
 (base / "local.json").write_text(json.dumps(local, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
-[ "$WS" = 1 ] && echo "참고: PM 모드에는 스킬이 없습니다. 작업공간 규칙(AGENTS.md 등)에서 .crossgate/kit/CROSSGATE.md 를 가리켜야 Master가 요청 정리·재검수·읽을 것 규칙을 읽습니다."
+[ "$WS" = 1 ] && echo "참고: 루트에서 연 세션에서 /crossgate 를 부르면 Master가 됩니다. 작업공간 규칙(AGENTS.md 등)에서 /crossgate 와 .crossgate/kit/CROSSGATE.md 를 가리키세요."
 echo "설치 완료: crossgate $VERSION [$SOURCE] → $DEST (봉인: .crossgate/kit/MANIFEST.sha256)"
