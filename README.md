@@ -1,6 +1,6 @@
 # Crossgate
 
-**Crossgate**는 AI 교차검수 개발 파이프라인의 실행 키트다. 이름은 cross(서로 다른 모델의 교차 검수)와 gate(단계마다 승인받아야 통과하는 관문)에서 왔다. 설계 원본은 `../crossgate-spec`(명세 v1.14.1)이다.
+**Crossgate**는 AI 교차검수 개발 파이프라인의 실행 키트다. 이름은 cross(서로 다른 모델의 교차 검수)와 gate(단계마다 승인받아야 통과하는 관문)에서 왔다. 설계 원본은 `../crossgate-spec`(명세 v1.14.2)이다.
 
 - 사용자는 Master(Claude)하고만 대화한다. Master가 Codex(`gpt-6-astra`)를 역할별로 호출한다.
 - 기본 배치: 기획·Wiki는 Claude가 쓰고 Codex가 검수한다. 개발은 Codex가 하고 Claude가 검수한다. QA는 Codex가 한다.
@@ -47,7 +47,7 @@ sh ~/Documents/projects/crossgate/install.sh --global
 
 ## 사용
 
-프로젝트 폴더에서 연 Claude Code에서 `/crossgate <요청>`을 입력한다. 크게를 새 버전으로 올릴 때는 `/crossgate 업그레이드`라고 한다. 작업 등급(가벼움·보통·무거움)은 Master가 추천하고 사용자가 확정한다. 처음부터 "가벼움으로"처럼 말해도 된다(CROSSGATE.md 10장).
+프로젝트 폴더에서 연 Claude Code에서 `/crossgate <요청>`을 입력한다. 크로스게이트를 새 버전으로 올릴 때는 `/crossgate 업그레이드`라고 한다. 작업 등급(가벼움·보통·무거움)은 Master가 추천하고 사용자가 확정한다. 처음부터 "가벼움으로"처럼 말해도 된다(CROSSGATE.md 10장).
 
 ## 규칙 바꾸기
 

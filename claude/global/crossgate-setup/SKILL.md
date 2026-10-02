@@ -1,6 +1,6 @@
 ---
 name: crossgate-setup
-description: Crossgate(크게, AI 교차검수 개발 파이프라인)를 현재 프로젝트에 설치하거나 새 버전으로 업그레이드한다. 사용자가 "크게 설치", "crossgate 설치", "크게 업그레이드", "/crossgate-setup"을 말할 때 쓴다. 이미 설치된 프로젝트의 개발 작업은 그 프로젝트의 /crossgate 스킬이 맡는다.
+description: Crossgate(크로스게이트, AI 교차검수 개발 파이프라인)를 현재 프로젝트에 설치하거나 새 버전으로 업그레이드한다. 사용자가 "크로스게이트 설치", "crossgate 설치", "크로스게이트 업그레이드", "/crossgate-setup"을 말할 때 쓴다. 이미 설치된 프로젝트의 개발 작업은 그 프로젝트의 /crossgate 스킬이 맡는다.
 ---
 
 # /crossgate-setup — Crossgate 설치·업그레이드
