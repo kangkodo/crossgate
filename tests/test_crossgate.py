@@ -422,7 +422,9 @@ cat >/dev/null
         # 무거움(기본)은 설정의 역할별 강도를 쓰고, Claude 검수에는 강도를 붙이지 않는다
         run = P("init-run 기능", repo).stdout.strip()
         sh(cli + "codex plan-reviewer --prompt-file q.md", repo)
-        assert "model_reasoning_effort=xhigh" in log.read_text().splitlines()[-1]
+        assert "model_reasoning_effort=medium" in log.read_text().splitlines()[-1]
+        sh(cli + "codex wiki-reviewer --prompt-file q.md", repo)
+        assert "model_reasoning_effort=low" in log.read_text().splitlines()[-1], "문서 대조는 낮은 강도"
         sh(cli + "claude dev-reviewer --prompt-file q.md", repo)
         assert "--effort" not in log.read_text().splitlines()[-1]
 
