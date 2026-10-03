@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -131,17 +132,61 @@ def repo_dir(cfg, name):
     return d
 
 
-def current_run(arg=None, writing=False):
-    """실행 선택: 명시 인자, 환경 변수, 현재 실행. 쓰기 묶기 검사는 후속 작업에서 한다."""
-    if arg:
-        return Path(arg).resolve()
+def recent_activity(run, cfg):
+    """실행 기록 세 파일 중 하나가 최근에 바뀌었는지."""
+    cutoff = time.time() - cfg.get("recent_minutes", RECENT_MIN) * 60
+    return any(p.exists() and p.stat().st_mtime >= cutoff
+               for p in (run / name for name in ("meta.json", "verdicts.jsonl", "usage.jsonl")))
+
+
+def run_state(run, cfg):
+    """옛 실행도 같은 기준으로 열림·끝남·닫힘을 판정한다."""
+    meta = json.loads((run / "meta.json").read_text(encoding="utf-8"))
+    if "closed" in meta:
+        return "닫힘"
+    recs = load(run)
+    for stage in route_conf(cfg, meta.get("route", "full"))["stages"]:
+        latest = {}
+        for rec in recs:
+            if rec["stage"] == stage:
+                latest[rec.get("repo")] = rec["verdict"]
+        expected = "PASSED" if stage == "qa" else "APPROVED"
+        if not latest or any(v != expected for v in latest.values()):
+            return "열림"
+    return "끝남"
+
+
+def current_run(arg=None, writing=False, *, allow_closed=False):
+    """명시 인자 → 환경 변수 → 현재 실행. 묶기 검사는 이 함수에서만 한다.
+
+    allow_closed는 닫기·다시 열기 명령만 사용한다. 최근 실행 묶기 검사는 그대로 한다.
+    """
     env = os.environ.get("CROSSGATE_RUN")
-    if env:
-        return (root() / env).resolve()
-    p = root() / ".crossgate" / "current-run"
-    if not p.exists():
-        sys.exit("현재 실행이 없습니다. crossgate init-run 을 먼저 실행하세요.")
-    return root() / p.read_text().strip()
+    implicit = not arg and not env
+    if arg:
+        run = Path(arg).resolve()
+    elif env:
+        run = (root() / env).resolve()
+    else:
+        p = root() / ".crossgate" / "current-run"
+        if not p.exists():
+            sys.exit("현재 실행이 없습니다. crossgate init-run 을 먼저 실행하세요.")
+        run = root() / p.read_text().strip()
+    cfg = config()
+    if writing and not allow_closed and run_state(run, cfg) == "닫힘":
+        message = "닫힌 실행에는 쓸 수 없습니다. close-run --reopen 으로 다시 여세요."
+        if implicit:
+            message += " init-run 으로 새 실행을 만들거나 --run 으로 다른 실행을 지정하세요."
+        sys.exit(message)
+    if implicit:
+        active = sorted(p.parent for p in (root() / "ai-log").glob("*/*/meta.json")
+                        if recent_activity(p.parent, cfg) and run_state(p.parent, cfg) == "열림")
+        if len(active) >= 2:
+            message = "최근 활동이 있는 열린 실행이 여럿입니다: " + ", ".join(p.name for p in active)
+            if writing:
+                sys.exit(message + ". --run 을 붙여 실행을 지정하세요.")
+            print("주의: " + message + ". current-run 을 사용합니다.", file=sys.stderr)
+    return run
 
 
 def load(run):
@@ -151,8 +196,16 @@ def load(run):
     return [json.loads(line) for line in f.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def reviews(recs, stage):
-    return [x for x in recs if x["stage"] == stage and x["verdict"] in REVIEW]
+def reviews(recs, stage, repo=None):
+    return [x for x in recs if x["stage"] == stage and x.get("repo") == repo and x["verdict"] in REVIEW]
+
+
+def attempt_number(recs, stage, verdict, repo=None):
+    submissions = sum(x["stage"] == stage and x.get("repo") == repo and x["verdict"] == "READY"
+                      for x in recs)
+    if submissions or verdict == "READY":
+        return submissions + (1 if verdict == "READY" else 0)
+    return sum(x["verdict"] != "BLOCKED" for x in reviews(recs, stage, repo)) + 1
 
 
 def request_approved(run):
@@ -164,8 +217,8 @@ def open_ids(rec):
     return {k for k, v in rec.get("issues", {}).items() if v != "resolved"}
 
 
-def escalation(recs, stage, cap):
-    rv = [x for x in reviews(recs, stage) if x["verdict"] != "BLOCKED"]
+def escalation(recs, stage, cap, repo=None):
+    rv = [x for x in reviews(recs, stage, repo) if x["verdict"] != "BLOCKED"]
     if not rv or rv[-1]["verdict"] in ("APPROVED", "PASSED"):
         return None
     last = rv[-3:]

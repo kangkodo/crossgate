@@ -3,8 +3,7 @@ import json
 import re
 import shutil
 import sys
-import time
-from cg.core import DIRS, KIT, RECENT_MIN, ROUTES, git, root
+from cg.core import DIRS, KIT, ROUTES, config, git, recent_activity, root
 
 
 def cmd_init_run(a):
@@ -22,11 +21,9 @@ def cmd_init_run(a):
     (run / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     cur = r / ".crossgate" / "current-run"
     prev = r / cur.read_text().strip() if cur.exists() else None
-    if prev and prev.is_dir():
-        idle = (time.time() - max(f.stat().st_mtime for f in prev.iterdir() if f.is_file())) / 60
-        if idle < RECENT_MIN:
-            print(f"주의: 현재 실행 {prev.name}이(가) {idle:.0f}분 전에 쓰였다. 다른 세션이 쓰는 중이면 그 세션의 기록이 "
-                  f"이 새 실행으로 섞인다. 모든 명령에 --run 을 붙인다.", file=sys.stderr)
+    if prev and prev.is_dir() and recent_activity(prev, config()):
+        print(f"주의: 현재 실행 {prev.name}에 최근 활동이 있습니다. 다른 세션이 쓰는 중이면 그 세션의 기록이 "
+              f"이 새 실행으로 섞입니다. 모든 명령에 --run 을 붙이세요.", file=sys.stderr)
     cur.write_text(str(run.relative_to(r)))
     print(run.relative_to(r))
 

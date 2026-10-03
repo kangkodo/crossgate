@@ -1,7 +1,7 @@
 import datetime as dt
 import json
 import sys
-from cg.core import LABEL, REVIEW, VERDICTS, at, config, config_value, current_run, escalation, git, is_pm, load, read_usage, repo_dir, write_timeline
+from cg.core import LABEL, REVIEW, VERDICTS, at, attempt_number, config, config_value, current_run, escalation, git, is_pm, load, read_usage, repo_dir, write_timeline
 
 
 def cmd_verdict(a):
@@ -17,8 +17,7 @@ def cmd_verdict(a):
                  if line.strip() and not line[3:].strip('"').startswith("ai-log/")]
         if dirty:
             sys.exit("커밋되지 않은 변경이 있습니다. 승인은 커밋된 상태에만 기록합니다.\n" + "\n".join(dirty[:10]))
-    submissions = [x for x in recs if x["stage"] == a.stage and x["verdict"] == "READY"]
-    attempt = a.attempt or (len(submissions) + (1 if a.verdict == "READY" else 0)) or 1
+    attempt = a.attempt or attempt_number(recs, a.stage, a.verdict, a.repo)
     issues = dict(kv.split("=", 1) for kv in a.issues.split(",")) if a.issues else {}
     model = a.model
     # 검수 판정의 모델은 그 엔진의 마지막 호출 기록에서 채운다. 손으로 적은 값이 다르면 알린다
@@ -38,7 +37,7 @@ def cmd_verdict(a):
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     write_timeline(run)
     print(f"기록: {a.stage} #{attempt} {LABEL[a.verdict]} @ {at(rec)} → {run.name}")
-    esc = escalation(load(run), a.stage, config_value(cfg, "cap", 3))
+    esc = escalation(load(run), a.stage, config_value(cfg, "cap", 3), a.repo)
     if esc:
         print(f"조정 필요: {esc}. ESCALATED를 기록하고 사용자에게 묻습니다.")
 
