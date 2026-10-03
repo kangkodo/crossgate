@@ -138,7 +138,8 @@ echo '{"type":"item.started"}'
         workdir = repo / '작업'
         workdir.mkdir()
         with patch('cg.calls.config', return_value=cfg), patch('cg.calls.root', return_value=repo), \
-                patch('cg.prompt.root', return_value=repo), \
+                patch('cg.prompt.root', return_value=repo), patch('cg.prompt.config', return_value=cfg), \
+                patch('cg.core.config', return_value=cfg), patch('cg.core.root', return_value=repo), \
                 patch.dict(os.environ, {'PATH': str(repo / 'fakebin') + ':' + os.environ['PATH']}):
             result = calls.invoke('codex', 'dev-reviewer', '검수 내용', run=run,
                                   workdir=workdir, effort='high', extra_guidance='추가 안내문')
