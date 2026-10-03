@@ -44,6 +44,7 @@ echo '{{"type":"turn.completed","usage":{{"input_tokens":5,"output_tokens":1}}}}
         last = log.read_text().splitlines()[-1]
         assert "-s read-only" in last and "--ephemeral" not in last, "세션 기록은 기본으로 남긴다"
         recs = [json.loads(line) for line in (repo / run / "usage.jsonl").read_text().splitlines()]
+        recs = [r for r in recs if r.get("event", "end") == "end"]
         assert [r["engine"] for r in recs] == ["claude", "codex"]
         assert recs[0]["input_tokens"] == 10 and recs[0]["cost_usd"] == 0.5
         assert "claude 호출 1회" in P("status", repo).stdout
