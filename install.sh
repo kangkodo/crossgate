@@ -162,6 +162,7 @@ from pathlib import Path
 cfg = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 name = "config.workspace.json" if sys.argv[3] == "1" else "config.json"
 template = json.loads((Path(sys.argv[2]) / name).read_text(encoding="utf-8"))
+# discussion을 포함해 템플릿의 새 최상위 항목을 같은 방식으로 안내한다.
 missing = [key for key in template if key not in cfg]
 if missing:
     print("설정에 없는 새 항목(기본값으로 동작): " + ", ".join(missing))
