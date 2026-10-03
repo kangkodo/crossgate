@@ -102,12 +102,24 @@ if [ ! -f "$DEST/.crossgate/config.json" ]; then
 fi
 if [ "$WS" = 0 ]; then
 
-for f in AGENTS.md CLAUDE.md; do
-  if ! grep -q "crossgate:start" "$DEST/$f" 2>/dev/null; then
-    { [ -f "$DEST/$f" ] && echo; cat "$SRC/templates/agents-snippet.md"; } >> "$DEST/$f"
-    echo "추가: $f 에 파이프라인 안내"
-  fi
-done
+python3 - "$DEST" "$SRC/templates/agents-snippet.md" <<'PY'
+import re, sys
+from pathlib import Path
+dest, template = Path(sys.argv[1]), Path(sys.argv[2])
+snippet = template.read_text(encoding="utf-8")
+pattern = re.compile(r"<!-- crossgate:start -->.*?<!-- crossgate:end -->", re.S)
+for name in ("AGENTS.md", "CLAUDE.md"):
+    path = dest / name
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    if pattern.search(text):
+        text = pattern.sub(lambda match: snippet.rstrip("\n"), text)
+        action = "갱신"
+    else:
+        text += ("\n" if path.exists() else "") + snippet
+        action = "추가"
+    path.write_text(text, encoding="utf-8")
+    print(f"{action}: {name} 에 파이프라인 안내")
+PY
 
 touch "$DEST/.gitignore"
 if ! grep -q "# crossgate" "$DEST/.gitignore"; then
@@ -116,6 +128,7 @@ if ! grep -q "# crossgate" "$DEST/.gitignore"; then
 fi
 # 이전 버전 설치본에는 local.json 줄이 없다
 grep -q "^.crossgate/local.json$" "$DEST/.gitignore" || printf '.crossgate/local.json\n' >> "$DEST/.gitignore"
+grep -Fxq '.crossgate/worktrees/' "$DEST/.gitignore" || printf '.crossgate/worktrees/\n' >> "$DEST/.gitignore"
 # 문서를 Obsidian으로 볼 때 생기는 설정 폴더가 승인 기록(커밋되지 않은 변경 검사)을 막지 않게
 grep -q "^.obsidian/$" "$DEST/.gitignore" || printf '.obsidian/\n' >> "$DEST/.gitignore"
 
@@ -143,3 +156,13 @@ if remote:
 PY
 [ "$WS" = 1 ] && echo "참고: 루트에서 연 세션에서 /crossgate 를 부르면 Master가 됩니다. 작업공간 규칙(AGENTS.md 등)에서 /crossgate 와 .crossgate/kit/CROSSGATE.md 를 가리키세요."
 echo "설치 완료: crossgate $VERSION [$SOURCE] → $DEST (봉인: .crossgate/kit/MANIFEST.sha256)"
+python3 - "$DEST/.crossgate/config.json" "$SRC/templates" "$WS" <<'PY'
+import json, sys
+from pathlib import Path
+cfg = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+name = "config.workspace.json" if sys.argv[3] == "1" else "config.json"
+template = json.loads((Path(sys.argv[2]) / name).read_text(encoding="utf-8"))
+missing = [key for key in template if key not in cfg]
+if missing:
+    print("설정에 없는 새 항목(기본값으로 동작): " + ", ".join(missing))
+PY
