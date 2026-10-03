@@ -18,4 +18,5 @@ def cmd_codex(a):
 def register(subparsers):
     p = subparsers.add_parser("codex"); p.add_argument("role"); p.add_argument("--prompt-file", required=True)
     p.add_argument("--run"); p.add_argument("--repo"); p.add_argument("--effort"); p.set_defaults(fn=cmd_codex)
+    p.add_argument("--fresh", action="store_true", help="이전 검수 세션을 이어 쓰지 않고 새로 호출")
     p._crossgate_order = 1

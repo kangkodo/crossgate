@@ -42,7 +42,7 @@ echo '{"type":"item.started"}'
 echo '{"type":"turn.completed","usage":{"input_tokens":5,"output_tokens":2}}'
 ''')
         with ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(lambda _: cli(repo), range(4)))
+            results = list(pool.map(lambda _: cli(repo, 'codex', '--fresh'), range(4)))
         assert all(p.returncode == 0 for p in results), [p.stderr for p in results]
         rows = records(run)
         assert len(rows) == 8
