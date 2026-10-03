@@ -1,13 +1,13 @@
 ---
 name: crossgate-setup
-description: Crossgate(크로스게이트, AI 교차검수 개발 파이프라인)를 현재 프로젝트에 설치하거나 새 버전으로 업그레이드한다. 사용자가 "크로스게이트 설치", "crossgate 설치", "크로스게이트 업그레이드", "/crossgate-setup"을 말할 때 쓴다. 이미 설치된 프로젝트의 개발 작업은 그 프로젝트의 /crossgate 스킬이 맡는다.
+description: 크로스게이트(AI 교차검수 개발 파이프라인)를 현재 프로젝트에 설치하거나 새 버전으로 업그레이드한다. 사용자가 "크로스게이트 설치", "crossgate 설치", "크로스게이트 업그레이드", "/crossgate-setup"을 말할 때 쓴다. 이미 설치된 프로젝트의 개발 작업은 그 프로젝트의 /crossgate 스킬이 맡는다.
 ---
 
-# /crossgate-setup — Crossgate 설치·업그레이드
+# /crossgate-setup — 크로스게이트 설치·업그레이드
 
 원본(실행 킷) 위치: `{{KIT}}`. 이 경로는 `install.sh --global`이 설치할 때 기록한다.
 
-현재 폴더가 git 저장소 루트인지 먼저 확인한다. `.crossgate/`가 이미 있으면 "업그레이드"로 간다. git이 아닌 폴더 아래 저장소가 여러 개이고 자체 작업 절차가 있으면, 아래 설치 대신 `sh {{KIT}}/install.sh --workspace .`로 PM 모드 엔진만 깔고 `config.json`의 `repos`를 채운다(CROSSGATE.md 11절).
+현재 폴더가 git 저장소 루트인지 먼저 확인한다. `.crossgate/`가 이미 있으면 "업그레이드"로 간다. git이 아닌 폴더 아래 저장소가 여러 개이고 자체 작업 절차가 있으면, 아래 설치 대신 `sh {{KIT}}/install.sh --workspace .`로 PM 모드 엔진·스킬을 깔고 `config.json`의 `repos`를 채운다(CROSSGATE.md 11절).
 
 ## 설치
 
@@ -20,10 +20,10 @@ description: Crossgate(크로스게이트, AI 교차검수 개발 파이프라�
    - 테스트·빌드 명령은 무엇인가? 화면 QA는 어떻게 띄우는가(오프라인 대체 데이터 포함)?
 2. `sh {{KIT}}/install.sh .`로 최신 태그를 설치하고 봉인한다.
 3. `.crossgate/config.json`을 점검 결과로 채운다: `gate`(테스트 명령), `forbidden`(점검에서 나온 경로), `qa`(실행 방법), `deploy`(배포 명령). AI가 새로 가정한 것이 있으면 사용자에게 확인한다.
-4. CI 검사: `.crossgate/kit/templates/crossgate.yml`을 `.github/workflows/crossgate.yml`로 복사하고 대상 브랜치를 맞춘다. 보호 규칙은 필수 검사 = 기존 테스트 + `merge-check`, 승인 0명, 관리자 우회 허용으로 한다. 저장소 설정을 바꾸기 전에는 사용자 허락을 받는다.
-5. 커밋하고 인프라 PR을 만든다. 테스트가 통과하면 병합한다. 병합 권한이 없으면 사용자에게 요청한다.
+4. CI 검사: `.crossgate/kit/templates/crossgate.yml`을 `.github/workflows/crossgate.yml`로 복사하고 대상 브랜치를 맞춘다. 보호 규칙은 필수 검사 = 기존 테스트 + `merge-check`, 승인 0명으로 한다. 저장소 설정을 바꾸기 전에는 사용자 허락을 받는다.
+5. 커밋하고 설치 PR을 만든다. 첫 설치는 기준 브랜치에 킷이 없어 업그레이드 인프라 PR 예외에 해당하지 않는다. 검사 결과와 저장소의 병합 규칙에 따라 설치를 마무리한다. 병합 권한이 없으면 사용자에게 요청한다.
 6. 보고: 설치한 버전, 점검 결과, 금지 경로, 사용자에게 남은 일(설정 허락 등). 이후 사용법은 "`/crossgate <할 일>`"이다.
 
 ## 업그레이드
 
-프로젝트의 `/crossgate` 스킬 8절 "업그레이드"와 같은 절차를 따른다. 원본은 `{{KIT}}`이다.
+프로젝트의 `/crossgate` 스킬 8절 "업그레이드"와 같은 절차를 따른다. 원본은 `{{KIT}}`이다. 병합 조건 검사와 필수 CI 검사가 통과하면 `gh pr merge --auto --squash`로 자동 병합에 넣는다. 설치기는 기존 설정의 `kit_version`을 맞추고, 없는 새 항목은 기본값으로 동작한다고 알린다. 새 설정은 `timeouts`·`parallel`·`docs`·`resume_reviews`·`recent_minutes`다. 안내 파일은 크로스게이트 표시 주석 안만 갱신한다.
