@@ -52,14 +52,14 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 
 ## 3. 개발 (`dev`) — Codex 작성, Claude 검수
 
-1. 작업 지시 파일(`02-development/task-N.md`)에 읽을 것, 구현할 DEV 항목, 이전 차단 지적을 적는다. 가벼움은 TODO 대신 변경과 대상 파일을 적고, 개발 전에 전 캡처를 찍는다.
+1. 작업 지시 파일(`02-development/task-N.md`)을 `templates/task.md`로 써서 등급, 읽을 것, 구현할 DEV 항목, 이전 차단 지적을 적는다. 자기 말로 다시 적기 절은 그대로 둔다. 가벼움은 TODO 대신 변경과 대상 파일을 적고, 개발 전에 전 캡처를 찍는다.
 2. 산출물·판정 기록·지시 파일을 모두 커밋하고 `BASE`로 기억한다. `$P codex developer --prompt-file <지시 파일>`로 개발한다. 정식 모드는 커밋하지 않은 `ai-log` 변경이 있으면 멈춘다. 재지시도 같은 순서다.
 3. 독립 작업은 2번 호출 대신 `$P parallel --task <파일> --task <파일> --protect-since BASE`를 쓴다(가벼움 불가, 기본 최대 3개, `--max`로 조정). 대상 파일이 겹치지 않게 나누고 공용 파일은 합친 뒤 한 작업이 고친다. 의존성 준비는 `parallel.setup`으로 정한다. 작업별 검사·커밋·병합과 마지막 gate는 명령이 처리한다. 실패한 작업은 결과 표와 남은 워크트리 경로로 확인한다. 완료 근거는 Master가 TODO에 옮긴다.
-4. 단일 개발은 `$P gate --protect-since BASE > <run>/raw/gate-N.log`를 돌린다. 보호 경로 변경은 BASE와 대조해 이번 호출의 변경만 되돌리고 반려한다. 검사 실패면 실패 내용을 새 지시에 넣고 1번으로 돌아간다. 동시 개발도 모두 합쳐지고 마지막 gate가 통과해야 다음으로 간다. 합친 뒤 공용 파일을 고쳤다면 gate를 다시 돌린다.
+4. 답변(동시 개발은 작업별 답변) 첫머리의 다시 적기를 지시와 대조한다. 목표·문제를 다르게 이해했으면 gate·검수 전에 지시를 고쳐 다시 부른다. 단일 개발은 `$P gate --protect-since BASE > <run>/raw/gate-N.log`를 돌린다. 보호 경로 변경은 BASE와 대조해 이번 호출의 변경만 되돌리고 반려한다. 검사 실패면 실패 내용을 새 지시에 넣고 1번으로 돌아간다. 동시 개발도 모두 합쳐지고 마지막 gate가 통과해야 다음으로 간다. 합친 뒤 공용 파일을 고쳤다면 gate를 다시 돌린다.
 5. 보통은 Master가 `roles/wiki-writer.md`대로 영향 문서를 갱신하고 `$P docs-check`를 돌린다. 통과한 변경을 커밋하고 `$P verdict --stage dev --verdict READY --actor codex`로 기록한다.
 6. 가벼움은 후 캡처를 찍어 전후를 비교한다. 바뀐 요소와 공유 스타일을 쓰는 대표 화면이 실제로 보여야 한다. 의도하지 않은 변화가 있으면 승격한다.
 7. `git diff BASE..HEAD -- . ':!ai-log' > <run>/raw/dev-diff-N.patch`로 전체 변경을 만든다. 동시 개발도 합친 뒤 한 번 검수한다. 작업 AI의 답변·자체 평가는 검수에 넘기지 않는다.
-8. 검수 지시의 읽을 것에 diff·TODO·관련 코드를 넣고, 보통은 결정 목록, 가벼움은 전후 캡처를 더한다. 재검수는 `$P status`에 나온 이전 반려 커밋부터의 `git diff <커밋>..HEAD -- . ':!ai-log'`를 delta 파일로 저장하고 이전 지적과 함께 앞세운다(R14).
+8. 검수 지시의 읽을 것에 diff·TODO·관련 코드를 넣고, 보통은 결정 목록, 가벼움은 전후 캡처를 더한다. 보통·무거움은 완료 근거의 안전 근거 테스트가 돈 실행 결과(gate 로그나 Master가 돌린 출력, `raw/`)를 더한다. 재검수는 `$P status`에 나온 이전 반려 커밋부터의 `git diff <커밋>..HEAD -- . ':!ai-log'`를 delta 파일로 저장하고 이전 지적과 함께 앞세운다(R14).
 9. `$P claude dev-reviewer --prompt-file <검수 지시>`로 읽기 전용 검수를 맡긴다. 명령을 쓸 수 없을 때만 읽기 도구를 가진 `crossgate-reviewer` 에이전트를 쓰며, 미등록이면 읽기 전용 에이전트에 `.claude/agents/crossgate-reviewer.md`를 넘긴다. 대체 사실을 판정 비고에 적는다.
 10. `$P verdict --stage dev ... --actor claude`로 판정을 기록한다. 반려면 1번으로 돌아간다. 시간 초과·멈춤(종료 코드 3)이면 BLOCKED로 기록한다.
 

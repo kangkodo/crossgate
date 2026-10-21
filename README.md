@@ -13,7 +13,7 @@
 |---|---|
 | `CROSSGATE.md` | 실행용 규칙 (판정, 루브릭, 응답 형식, 상한, 병합·배포) |
 | `roles/` | 역할 카드 10장 |
-| `templates/` | request, todo, 프로젝트 설정(`config.json`), CI 검사, AGENTS/CLAUDE 안내, .gitignore 항목 |
+| `templates/` | request, todo, 작업 지시(task), 프로젝트 설정(`config.json`), CI 검사, AGENTS/CLAUDE 안내, .gitignore 항목 |
 | `bin/crossgate` | 명령 진입점. 구현은 `bin/cg/`의 명령·호출·검사 모듈 |
 | `claude/` | `/crossgate` 스킬(Master 플레이북), `crossgate-reviewer` 서브에이전트 |
 | `install.sh` | 프로젝트에 설치·업그레이드 |
