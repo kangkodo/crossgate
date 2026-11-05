@@ -1,5 +1,15 @@
 # 변경 이력
 
+## 0.10.2 (2026-11-06) — 샌드박스 강화
+0.10.1 커밋에 대한 자동 보안 검토 4건(치명 1·높음 1·중간 2)을 모두 반영했다. 0.10.1도 설치 전이다.
+- 샌드박스 밖으로 나가는 길을 막음: AppleEvents 보내기, LaunchServices·AppleEvents·클립보드 서비스 조회, `open`·`osascript`·`osacompile`·`launchctl`·`at`·`crontab`·`pbcopy`·`pbpaste` 실행
+- 홈 아래 파일 내용 읽기를 기본 금지로 바꿈(목록 방식은 빈틈이 많았다). PATH에서 찾은 홈 아래 도구 설치 폴더, 이 저장소의 `.git`, Playwright 브라우저 폴더, `probe.read_allow`만 허용. 경로 메타데이터는 읽을 수 있다(도구가 경로를 따라가야 한다)
+- 쓰기는 이번 재현의 일회용 폴더(워크트리·HOME·TMPDIR)와 `probe.write_allow`만. `/private/tmp`·사용자 임시 폴더 전체 쓰기 허용을 뺐다
+- 환경 변수는 허용 목록(PATH·LANG·LC_*·TERM·TZ·USER·LOGNAME·SHELL·CI·NODE_ENV와 `probe.env`)만 넘기고 HOME·TMPDIR은 일회용 폴더로 바꿈. 샌드박스가 없어도 적용
+- 인자 검사를 `shlex`로 쪼개서 함: `-c/etc/passwd`처럼 옵션에 붙여 쓴 값, `x=/…`·`:/…`, 닫히지 않은 따옴표도 거부
+- Master는 샌드박스 유무와 상관없이 재현 패치를 먼저 읽는다(스킬). 이 샌드박스는 막을 것을 쌓는 방식이라 완전한 경계가 아니라는 점을 규칙에 적음
+- pnpm·vitest·git·python이 새 프로필에서 도는 것을 확인했다
+
 ## 0.10.1 (2026-11-06) — 재현 실행을 샌드박스에 가둠
 0.10.0의 `probe`는 허용 명령으로 셸 연결만 막았다. 검수자가 쓴 재현 패치가 테스트·설정 파일을 고치면 허용된 명령이 그 코드를 이 컴퓨터에서 그대로 돌렸다(태그 직후 자동 보안 검토의 지적). 0.10.0은 어느 프로젝트에도 설치하기 전이다.
 - macOS에서는 재현 명령을 `sandbox-exec`로 가둔다(`probe.sandbox`, 기본 `auto`): 쓰기는 일회용 워크트리·임시 폴더만, 홈의 비밀 폴더 읽기 금지, 네트워크 금지. 로컬 DB·서버가 필요한 재현은 `probe.network: true`(바깥 네트워크도 함께 열린다. `localhost`만 허용하는 규칙은 실제로 바깥 IP까지 열어서 쓰지 않았다). `probe.sandbox: true`는 샌드박스가 없으면 거부, `false`는 끈다. 기록에 `sandbox`가 남는다

@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -20,12 +21,34 @@ from cg.core import config, config_value, current_run, git, is_pm, mask, repo_di
 
 # 검수자가 붙이는 인자에 셸 연결·치환이 들어가면 허용 목록이 무의미해진다.
 UNSAFE = re.compile(r"[;&|<>$`\\\n()]")
-# 작업 폴더 밖 파일을 설정·모듈로 불러오게 하는 인자(절대 경로, 홈, 상위 폴더)도 막는다.
-OUTSIDE = re.compile(r"""(^|[\s='"])[/~]|(^|[\s='"/])\.\.([/\s'"]|$)""")
-# 재현 명령의 환경에서 뺄 변수 이름. 패치된 코드가 열쇠를 읽지 못하게 한다.
-SECRET_ENV = re.compile(r"(?i)(KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|SESSION)")
-# 샌드박스에서 읽기를 막는 홈 아래 비밀 폴더.
-SENSITIVE = (".ssh", ".aws", ".gnupg", ".config/gh", ".netrc", ".docker", "Library/Keychains")
+# 재현 명령에 넘기는 환경 변수(허용 목록). 나머지는 config.probe.env에 이름을 더한다.
+ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ", "USER", "LOGNAME", "SHELL", "CI", "NODE_ENV")
+# 샌드박스에서 실행을 막는 프로그램: 샌드박스 밖에서 앱·작업을 띄우거나 클립보드로 내보내는 길.
+NO_EXEC = ("/usr/bin/open", "/usr/bin/osascript", "/usr/bin/osacompile", "/bin/launchctl", "/usr/bin/at",
+           "/usr/bin/crontab", "/usr/bin/pbcopy", "/usr/bin/pbpaste")
+NO_MACH = ("com.apple.coreservices.launchservicesd", "com.apple.lsd.mapdb", "com.apple.lsd.modifydb",
+           "com.apple.coreservices.appleevents", "com.apple.pasteboard.1")
+# 홈 아래에서 기본으로 읽기를 허용하는 도구 폴더(PATH에서 찾은 것 말고).
+TOOL_DIRS = ("Library/Caches/ms-playwright", ".cache/ms-playwright")
+
+
+def outside_arg(rest):
+    """검수자가 붙인 인자가 작업 폴더 밖 경로를 가리키면 참. 셸과 같은 규칙으로 쪼개서 본다."""
+    try:
+        tokens = shlex.split(rest)
+    except ValueError:
+        return True
+    for token in tokens:
+        if token.startswith("-"):
+            if "=" in token:
+                token = token.split("=", 1)[1]
+            elif "/" in token or "~" in token:
+                return True  # -c/etc/passwd 처럼 옵션에 붙여 쓴 값
+            else:
+                continue
+        if token.startswith(("/", "~")) or "~" in token or ".." in Path(token).parts or re.search(r"[=:,]/", token):
+            return True
+    return False
 
 
 def allowed(prefixes, cmd):
@@ -35,16 +58,55 @@ def allowed(prefixes, cmd):
         if cmd == prefix:
             return True
         rest = cmd[len(prefix):]
-        if cmd.startswith(prefix + " ") and not UNSAFE.search(rest) and not OUTSIDE.search(rest):
+        if cmd.startswith(prefix + " ") and not UNSAFE.search(rest) and not outside_arg(rest):
             return True
     return False
 
 
-def sandbox(cfg, tree):
+def tool_roots(home):
+    """PATH에서 홈 아래 도구 설치 폴더를 찾는다. 홈 바로 아래 폴더(Library, .config 등)는 통째로 열지 않는다."""
+    roots = set()
+
+    def add(path):
+        try:
+            rel = path.relative_to(home)
+        except ValueError:
+            return
+        if len(rel.parts) >= 2:
+            roots.add(path)
+            if path.name == "bin" and len(rel.parts) >= 3:
+                roots.add(path.parent)
+
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        d = Path(entry).expanduser()
+        if not entry or not d.is_dir():
+            continue
+        for cand in (d, d.resolve()):
+            add(cand)
+        try:
+            inside = d.resolve().is_relative_to(home)
+        except AttributeError:  # 3.8
+            inside = str(d.resolve()).startswith(str(home) + os.sep)
+        if inside:
+            try:
+                for f in d.iterdir():
+                    if f.is_symlink():
+                        add(f.resolve().parent)
+            except OSError:
+                pass
+    for rel in TOOL_DIRS:
+        add(home / rel)
+    return roots
+
+
+def sandbox(cfg, base, target):
     """(명령 앞에 붙일 인자 또는 None, 기록할 이름). macOS는 sandbox-exec로 가둔다.
 
-    쓰기는 일회용 워크트리·임시 폴더만, 홈의 비밀 폴더 읽기 금지, 네트워크는 probe.network가 참일 때만.
-    ponytail: macOS만 가둔다. 다른 운영체제는 경고하고 기록만 남긴다. 필요해지면 bwrap 등을 같은 자리에 붙인다.
+    쓰기는 이번 재현의 일회용 폴더와 probe.write_allow만, 홈 아래 파일 내용 읽기는 도구 폴더·이 저장소의 .git·probe.read_allow만,
+    샌드박스 밖에서 앱을 띄우는 길(AppleEvents·LaunchServices·open·osascript·launchctl)과 클립보드는 막는다.
+    네트워크는 probe.network가 참일 때만.
+    ponytail: allow default 위에 막을 것을 쌓는 방식이라 완전한 경계가 아니다(모르는 서비스 경로가 남을 수 있다).
+    그래서 Master가 재현 패치를 읽은 뒤 돌리는 절차를 함께 둔다. 더 막아야 하면 deny default 프로필로 바꾼다.
     """
     mode = config_value(cfg, "probe.sandbox", "auto")
     if mode is False:
@@ -59,15 +121,30 @@ def sandbox(cfg, tree):
     def q(path):
         return str(path).replace("\\", "\\\\").replace('"', '\\"')
 
+    def paths(items):
+        return "".join(f'(subpath "{q(x)}")' for x in sorted(set(items), key=str))
+
+    home = Path.home().resolve()
+    reads = set(tool_roots(home))
+    common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=target,
+                            capture_output=True, text=True).stdout.strip()
+    if common:
+        reads.add(Path(common).resolve())
+    reads |= {Path(os.path.expanduser(str(x))).resolve() for x in config_value(cfg, "probe.read_allow", []) or []}
     network = bool(config_value(cfg, "probe.network", False))
-    home = Path.home()
-    rules = ["(version 1)", "(allow default)"]
+    rules = ["(version 1)", "(allow default)", "(deny appleevent-send)",
+             "(deny process-exec " + "".join(f'(literal "{x}")' for x in NO_EXEC) + ")",
+             "(deny mach-lookup " + "".join(f'(global-name "{x}")' for x in NO_MACH) + ")"]
     if not network:
         rules.append("(deny network*)")
-    rules.append("(deny file-read* " + "".join(f'(subpath "{q(home / d)}")' for d in SENSITIVE) + ")")
+    rules.append(f'(deny file-read-data (subpath "{q(home)}"))')
+    if reads:
+        rules.append("(allow file-read-data " + paths(reads) + ")")
+    writes = {base.resolve()} | {Path(os.path.expanduser(str(x))).resolve()
+                                 for x in config_value(cfg, "probe.write_allow", []) or []}
     rules.append("(deny file-write*)")
-    rules.append(f'(allow file-write* (subpath "{q(tree.resolve())}") (subpath "/private/tmp") '
-                 '(subpath "/private/var/folders") (subpath "/dev"))')
+    rules.append("(allow file-write* " + paths(writes) + '(subpath "/dev") '
+                 '(regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db"))')
     return [exe, "-p", "".join(rules)], "macos" + ("+network" if network else "")
 
 
@@ -94,6 +171,8 @@ def attempt(target, commit, patch, cmd, cfg, seconds):
     """(상태, 종료 코드, 출력, 샌드박스). 상태: ran | worktree-failed | setup-failed | patch-failed | timeout."""
     base = Path(tempfile.mkdtemp(prefix="crossgate-probe-"))
     tree = base / "tree"
+    (base / "home").mkdir()
+    (base / "tmp").mkdir()
     try:
         r = subprocess.run(["git", "-c", "core.quotepath=false", "worktree", "add", "--detach", "-q", str(tree), commit],
                            cwd=target, capture_output=True, text=True)
@@ -111,8 +190,10 @@ def attempt(target, commit, patch, cmd, cfg, seconds):
             r = subprocess.run(["git", "apply", "--whitespace=nowarn", str(patch)], cwd=tree, capture_output=True, text=True)
             if r.returncode:
                 return "patch-failed", r.returncode, r.stdout + r.stderr, None
-        prefix, boxed = sandbox(cfg, tree)
-        env = {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
+        prefix, boxed = sandbox(cfg, base, target)
+        keep = set(ENV_KEEP) | set(config_value(cfg, "probe.env", []) or [])
+        env = {k: v for k, v in os.environ.items() if k in keep}
+        env.update(HOME=str(base / "home"), TMPDIR=str(base / "tmp"))
         code, out = shell(cmd, tree, seconds, prefix, env)
         return ("timeout" if code is None else "ran"), code, out, boxed
     finally:

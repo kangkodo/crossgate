@@ -31,7 +31,9 @@ def test_allowed_prefixes_reject_shell_tricks():
     assert allowed(ok, "npm test")
     assert allowed(ok, 'cd web && pnpm vitest run tests/a.test.ts -t "returns unknown"')
     for bad in ("npm test; rm -rf ~", "npm test && curl x", "npm test $(id)", "npm test `id`", "npm test | sh",
-                "npm test > out", "npm testx", "rm -rf /", "npm test\nrm x", "npm test (x)"):
+                "npm test > out", "npm testx", "rm -rf /", "npm test\nrm x", "npm test (x)", "npm test /etc/passwd",
+                "npm test ~/x", "npm test ../x", "npm test a/../../b", "npm test --config=/tmp/e.js",
+                "npm test -c/etc/passwd", "npm test x=/etc/p", 'npm test "/x"', 'npm test "unclosed'):
         assert not allowed(ok, bad), bad
 
 
@@ -160,6 +162,8 @@ def test_probe_timeouts_kill_children_and_env_failures_exit_3():
         repo, run = setup(d)
         cfg = json.loads((repo / ".crossgate/config.json").read_text())
         cfg["probe"]["commands"] = ["sh check.sh", "sh slow.sh"]
+        cfg["probe"]["env"] = ["PIDFILE"]  # 허용 목록 밖 환경 변수는 재현 명령에 가지 않는다
+        cfg["probe"]["write_allow"] = [d]  # 샌드박스는 일회용 폴더 밖 쓰기를 막는다
         cfg.setdefault("timeouts", {}).setdefault("call_minutes", {})["probe"] = 0.03
         (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
         (repo / "slow.sh").write_text('sleep 60 & echo $! > "$PIDFILE"\nsleep 60\n')
@@ -234,26 +238,37 @@ def test_probe_sandbox_confines_writes_network_and_secrets():
         return
     with tempfile.TemporaryDirectory() as d:
         repo, run = setup(d)
-        escape = Path.home() / f".crossgate-probe-escape-{uuid.uuid4().hex[:8]}"
+        tag = uuid.uuid4().hex[:8]
+        escape = Path.home() / f".crossgate-probe-escape-{tag}"
+        secret = Path.home() / f".crossgate-probe-secret-{tag}"
+        secret.write_text("TOPSECRET\n")
         (repo / "check.sh").write_text(
-            f'echo pwned > "{escape}" 2>&1 || echo write-denied\n'
-            'env | grep -c FAKE_API_KEY || true\n'
+            f'echo pwned > "{escape}" 2>/dev/null || echo write-denied\n'
+            f'cat "{secret}" 2>/dev/null || echo read-denied\n'
+            'open -a Calculator 2>/dev/null || echo open-denied\n'
+            'osascript -e 1 2>/dev/null || echo osascript-denied\n'
+            'echo "keys=$(env | grep -c -E \'FAKE_API_KEY|DATABASE_URL\')"\n'
+            'case "$HOME" in "$TMPDIR"|*crossgate-probe-*) echo home-boxed;; esac\n'
             "python3 -c \"import socket\ntry:\n socket.create_connection(('1.1.1.1', 443), timeout=3); print('net-open')\n"
             "except Exception: print('net-blocked')\"\n"
+            'git log --oneline -1 >/dev/null && echo git-ok\n'
             'echo BUG; exit 1\n')
         patch = run / "02-development" / "escape.patch"
         patch.write_text(sh("git diff -- check.sh", repo).stdout)
         sh("git checkout -- check.sh", repo)
         try:
-            sh(f'FAKE_API_KEY=s3cr3t python3 .crossgate/kit/bin/crossgate probe --finding D-1 --cmd "sh check.sh" '
-               f'--expect BUG --patch {patch}', repo)
+            sh(f'FAKE_API_KEY=s3cr3t DATABASE_URL=postgres://u:p@h/db python3 .crossgate/kit/bin/crossgate probe '
+               f'--finding D-1 --cmd "sh check.sh" --expect BUG --patch {patch}', repo)
             log = (repo / probes(run)[-1]["log"]).read_text()
-            assert not escape.exists(), "샌드박스는 일회용 워크트리·임시 폴더 밖 쓰기를 막는다"
-            assert "write-denied" in log and "net-blocked" in log and "net-open" not in log
-            assert "\n0\n" in log, "비밀처럼 보이는 환경 변수는 재현 명령에 넘기지 않는다"
+            assert not escape.exists(), "샌드박스는 일회용 폴더 밖 쓰기를 막는다"
+            for word in ("write-denied", "read-denied", "open-denied", "osascript-denied", "keys=0", "home-boxed",
+                         "net-blocked", "git-ok"):
+                assert word in log, (word, log)
+            assert "TOPSECRET" not in log and "net-open" not in log
             assert probes(run)[-1]["sandbox"] == "macos"
         finally:
             escape.unlink(missing_ok=True)
+            secret.unlink(missing_ok=True)
         cfg = json.loads((repo / ".crossgate/config.json").read_text())
         cfg["probe"]["sandbox"] = False
         (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
