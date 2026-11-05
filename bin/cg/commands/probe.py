@@ -1,6 +1,6 @@
 """차단 지적을 일회용 워크트리에서 실행으로 재현한다(CROSSGATE.md R15).
 
-검수자는 읽기 전용이라 재현 명령과 패치를 글로만 낸다. 이 명령이 검수한 커밋을 일회용 워크트리로 꺼내
+검수자는 읽기 전용이라 재현 명령과 패치를 글로만 낸다. 이 명령이 검수한 커밋을 일회용 복사본(공유 clone)으로 꺼내
 패치를 적용하고 허용된 명령을 돌린다. 종료 코드가 0이 아니고 출력에 실패 표시가 있으면 재현이다.
 결과는 실행 기록의 probes.jsonl과 raw/에 남고, verdict가 개발 반려를 기록할 때 이것을 확인한다.
 """
@@ -17,7 +17,7 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from cg.core import config, config_value, current_run, git, is_pm, mask, repo_dir, root
+from cg.core import config, config_value, current_run, is_pm, mask, repo_dir, root
 
 # 검수자가 붙이는 인자에 셸 연결·치환이 들어가면 허용 목록이 무의미해진다.
 UNSAFE = re.compile(r"[;&|<>$`\\\n()]")
@@ -52,15 +52,16 @@ def outside_arg(rest):
 
 
 def allowed(prefixes, cmd):
+    """허용되면 실제로 돌릴 명령, 아니면 None. 인자는 검증한 토큰을 하나씩 따옴표로 감싸 셸 확장(*, {}, ?)을 막는다."""
     cmd = cmd.strip()
     for prefix in prefixes:
         prefix = prefix.strip()
         if cmd == prefix:
-            return True
+            return prefix
         rest = cmd[len(prefix):]
         if cmd.startswith(prefix + " ") and not UNSAFE.search(rest) and not outside_arg(rest):
-            return True
-    return False
+            return prefix + "".join(" " + shlex.quote(t) for t in shlex.split(rest))
+    return None
 
 
 def tool_roots(home):
@@ -129,22 +130,26 @@ def sandbox(cfg, base, target):
     common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=target,
                             capture_output=True, text=True).stdout.strip()
     if common:
-        reads.add(Path(common).resolve())
+        reads.add(Path(common).resolve() / "objects")  # 공유 clone이 빌려 쓰는 객체만. config·hooks는 읽지 않는다
     reads |= {Path(os.path.expanduser(str(x))).resolve() for x in config_value(cfg, "probe.read_allow", []) or []}
     network = bool(config_value(cfg, "probe.network", False))
     rules = ["(version 1)", "(allow default)", "(deny appleevent-send)",
-             "(deny process-exec " + "".join(f'(literal "{x}")' for x in NO_EXEC) + ")",
-             "(deny mach-lookup " + "".join(f'(global-name "{x}")' for x in NO_MACH) + ")"]
+             "(deny process-exec " + "".join(f'(literal "{x}")' for x in NO_EXEC)
+             + f'(subpath "{q((base / "home").resolve())}")(subpath "{q((base / "tmp").resolve())}"))',
+             "(deny mach-lookup " + "".join(f'(global-name "{x}")' for x in NO_MACH)
+             + '(global-name-regex #"^com\\.apple\\.xpc\\.launchd"))']
     if not network:
         rules.append("(deny network*)")
-    rules.append(f'(deny file-read-data (subpath "{q(home)}"))')
+    # 본 저장소는 홈 밖에 있어도 읽지 못하게 한다(.git/config의 토큰, 추적하지 않는 .env). 객체만 빌려 쓴다.
+    rules.append(f'(deny file-read-data (subpath "{q(home)}") (subpath "{q(Path(target).resolve())}"))')
     if reads:
         rules.append("(allow file-read-data " + paths(reads) + ")")
+    rules.append(f'(allow file-read-data (subpath "{q(base.resolve())}"))')
     writes = {base.resolve()} | {Path(os.path.expanduser(str(x))).resolve()
                                  for x in config_value(cfg, "probe.write_allow", []) or []}
     rules.append("(deny file-write*)")
     rules.append("(allow file-write* " + paths(writes) + '(subpath "/dev") '
-                 '(regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db"))')
+                 '(regex #"^/private/var/folders/[^/]+/[^/]+/T/xcrun_db(-[A-Za-z0-9]+)?$"))')
     return [exe, "-p", "".join(rules)], "macos" + ("+network" if network else "")
 
 
@@ -168,16 +173,21 @@ def shell(cmd, cwd, seconds, prefix=None, env=None):
 
 
 def attempt(target, commit, patch, cmd, cfg, seconds):
-    """(상태, 종료 코드, 출력, 샌드박스). 상태: ran | worktree-failed | setup-failed | patch-failed | timeout."""
+    """(상태, 종료 코드, 출력, 샌드박스). 상태: ran | copy-failed | setup-failed | patch-failed | timeout.
+
+    복사본은 객체만 빌려 쓰는 공유 clone이다(본 저장소의 config·hooks·워크트리 목록을 건드리지 않는다).
+    """
     base = Path(tempfile.mkdtemp(prefix="crossgate-probe-"))
     tree = base / "tree"
     (base / "home").mkdir()
     (base / "tmp").mkdir()
     try:
-        r = subprocess.run(["git", "-c", "core.quotepath=false", "worktree", "add", "--detach", "-q", str(tree), commit],
-                           cwd=target, capture_output=True, text=True)
+        r = subprocess.run(["git", "clone", "-q", "--shared", "--no-checkout", str(target), str(tree)],
+                           capture_output=True, text=True)
+        if not r.returncode:
+            r = subprocess.run(["git", "-C", str(tree), "checkout", "-q", "--detach", commit], capture_output=True, text=True)
         if r.returncode:
-            return "worktree-failed", r.returncode, r.stdout + r.stderr, None
+            return "copy-failed", r.returncode, r.stdout + r.stderr, None
         # 준비 명령은 설정(보호 경로)이 정한 것이고 패치 전에 돈다. gate와 같은 신뢰 수준이라 가두지 않는다.
         setup = config_value(cfg, "parallel.setup", None)
         if setup:
@@ -197,8 +207,6 @@ def attempt(target, commit, patch, cmd, cfg, seconds):
         code, out = shell(cmd, tree, seconds, prefix, env)
         return ("timeout" if code is None else "ran"), code, out, boxed
     finally:
-        git("worktree", "remove", "--force", str(tree), check=False, cwd=target)
-        git("worktree", "prune", check=False, cwd=target)
         shutil.rmtree(base, ignore_errors=True)
 
 
@@ -224,7 +232,8 @@ def cmd_probe(a):
     target = repo or r
     rc = cfg["repos"][a.repo] if repo else cfg
     prefixes = config_value(cfg, "probe.commands", None) or [g["run"] for g in rc.get("gate", [])]
-    if not allowed(prefixes, a.cmd):
+    run_cmd = allowed(prefixes, a.cmd)
+    if not run_cmd:
         refuse("허용되지 않은 재현 명령입니다. config.probe.commands(없으면 gate 명령)로 시작하고, 뒤에 붙는 인자에는 "
                  "; & | < > $ ` ( ) 를 쓰지 않는다.\n허용: " + " / ".join(prefixes))
     patch = Path(a.patch).resolve() if a.patch else None
@@ -233,10 +242,10 @@ def cmd_probe(a):
     commit = resolve(target, a.commit or "HEAD")
     baseline = resolve(target, a.baseline) if a.baseline else None
     seconds = float(config_value(cfg, "timeouts.call_minutes.probe", 10)) * 60
-    head = attempt(target, commit, patch, a.cmd, cfg, seconds)
+    head = attempt(target, commit, patch, run_cmd, cfg, seconds)
     base = None
     if baseline:
-        base = attempt(target, baseline, patch, a.cmd, cfg, seconds)
+        base = attempt(target, baseline, patch, run_cmd, cfg, seconds)
     failed_here = head[0] == "ran" and head[1] != 0 and a.expect in head[2]
     clean_before = base is None or (base[0] == "ran" and base[1] == 0)
     if head[0] != "ran" or (base and base[0] != "ran"):
@@ -253,7 +262,7 @@ def cmd_probe(a):
         parts += [f"# 기준선 @ {baseline[:7]}", f"상태 {base[0]} · 종료 코드 {base[1]}", mask(base[2])]
     log.write_text("\n".join(parts) + "\n", encoding="utf-8")
     rec = {"id": pid, "ts": dt.datetime.now().isoformat(timespec="seconds"), "finding": a.finding, "repo": a.repo,
-           "commit": commit, "cmd": a.cmd, "expect": a.expect,
+           "commit": commit, "cmd": run_cmd, "expect": a.expect,
            "patch": hashlib.sha256(patch.read_bytes()).hexdigest()[:12] if patch else None,
            "exit": head[1], "state": head[0], "baseline": baseline, "baseline_exit": base[1] if base else None,
            "baseline_state": base[0] if base else None, "outcome": state, "sandbox": head[3],

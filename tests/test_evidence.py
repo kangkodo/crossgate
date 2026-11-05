@@ -208,14 +208,15 @@ def test_probe_timeouts_kill_children_and_env_failures_exit_3():
         assert r.returncode == 3 and last["state"] == "ran" and last["baseline_state"] == "patch-failed"
         assert last["outcome"] == "error"
         assert json.loads(P("retro --json", repo).stdout)["probes"]["error"] == 3
-        # 워크트리를 만들 수 없으면 환경 실패(3)이고 기록이 남는다. 인자 오류는 2다
+        # 복사본을 만들 수 없으면 환경 실패(3)이고 기록이 남는다. 인자 오류는 2다
         assert P('probe --finding D-6 --cmd "sh check.sh" --expect BUG --commit 없는커밋', repo, ok=False).returncode == 2
-        sh("chmod a-w .git", repo)
-        try:
-            r = P('probe --finding D-7 --cmd "sh check.sh" --expect BUG', repo, ok=False)
-        finally:
-            sh("chmod u+w .git", repo)
-        assert r.returncode == 3 and probes(run)[-1]["state"] == "worktree-failed"
+        fake = Path(d) / "fakebin"
+        fake.mkdir()
+        (fake / "git").write_text('#!/bin/sh\n[ "$1" = clone ] && { echo "clone 실패" >&2; exit 128; }\nexec /usr/bin/git "$@"\n')
+        (fake / "git").chmod(0o755)
+        r = sh(f'PATH={fake}:$PATH python3 .crossgate/kit/bin/crossgate probe --finding D-7 --cmd "sh check.sh" --expect BUG',
+               repo, ok=False)
+        assert r.returncode == 3 and probes(run)[-1]["state"] == "copy-failed"
 
 
 def test_proof_and_contrast_are_exclusive():
@@ -242,6 +243,7 @@ def test_probe_sandbox_confines_writes_network_and_secrets():
         escape = Path.home() / f".crossgate-probe-escape-{tag}"
         secret = Path.home() / f".crossgate-probe-secret-{tag}"
         secret.write_text("TOPSECRET\n")
+        sh("git config remote.origin.url https://TOKEN123@example.invalid/x.git", repo)
         (repo / "check.sh").write_text(
             f'echo pwned > "{escape}" 2>/dev/null || echo write-denied\n'
             f'cat "{secret}" 2>/dev/null || echo read-denied\n'
@@ -252,6 +254,7 @@ def test_probe_sandbox_confines_writes_network_and_secrets():
             "python3 -c \"import socket\ntry:\n socket.create_connection(('1.1.1.1', 443), timeout=3); print('net-open')\n"
             "except Exception: print('net-blocked')\"\n"
             'git log --oneline -1 >/dev/null && echo git-ok\n'
+            f'cat "{repo}/.git/config" 2>/dev/null || echo gitconfig-denied\n'
             'echo BUG; exit 1\n')
         patch = run / "02-development" / "escape.patch"
         patch.write_text(sh("git diff -- check.sh", repo).stdout)
@@ -262,9 +265,9 @@ def test_probe_sandbox_confines_writes_network_and_secrets():
             log = (repo / probes(run)[-1]["log"]).read_text()
             assert not escape.exists(), "샌드박스는 일회용 폴더 밖 쓰기를 막는다"
             for word in ("write-denied", "read-denied", "open-denied", "osascript-denied", "keys=0", "home-boxed",
-                         "net-blocked", "git-ok"):
+                         "net-blocked", "git-ok", "gitconfig-denied"):
                 assert word in log, (word, log)
-            assert "TOPSECRET" not in log and "net-open" not in log
+            assert "TOPSECRET" not in log and "TOKEN123" not in log and "net-open" not in log
             assert probes(run)[-1]["sandbox"] == "macos"
         finally:
             escape.unlink(missing_ok=True)
@@ -275,3 +278,17 @@ def test_probe_sandbox_confines_writes_network_and_secrets():
         commit(repo, "sandbox off")
         P('probe --finding D-2 --cmd "sh check.sh" --expect "없는 표시"', repo, ok=False)
         assert probes(run)[-1]["sandbox"] == "none"
+
+
+def test_probe_runs_exactly_the_checked_arguments():
+    with tempfile.TemporaryDirectory() as d:
+        repo, run = setup(d)
+        cfg = json.loads((repo / ".crossgate/config.json").read_text())
+        cfg["probe"]["commands"] = ["sh args.sh"]
+        (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
+        (repo / "args.sh").write_text('echo "ARGS=$#:$1:$2"; echo BUG; exit 1\n')
+        commit(repo, "args")
+        P('probe --finding D-1 --cmd "sh args.sh * {a,b}" --expect BUG', repo)
+        rec = probes(run)[-1]
+        assert "ARGS=2:*:{a,b}" in (repo / rec["log"]).read_text(), "셸 확장 없이 검증한 인자 그대로 돈다"
+        assert rec["cmd"] == "sh args.sh '*' '{a,b}'"
