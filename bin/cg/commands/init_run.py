@@ -17,7 +17,8 @@ def cmd_init_run(a):
         (run / d).mkdir(parents=True)
     shutil.copy(KIT / "templates" / "request.md", run / "00-request" / "request.md")
     meta = {"slug": slug, "route": "standard" if a.quick else a.route,
-            "branch": git("rev-parse", "--abbrev-ref", "HEAD", check=False, cwd=r) or None, "created": now.isoformat(timespec="seconds")}
+            "branch": git("rev-parse", "--abbrev-ref", "HEAD", check=False, cwd=r) or None, "created": now.isoformat(timespec="seconds"),
+            "kit": (KIT / "VERSION").read_text().strip() if (KIT / "VERSION").exists() else "?"}
     (run / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     cur = r / ".crossgate" / "current-run"
     prev = r / cur.read_text().strip() if cur.exists() else None

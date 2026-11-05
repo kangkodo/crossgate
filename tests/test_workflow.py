@@ -40,7 +40,22 @@ def test_flow():
             P(f"verdict --stage {st} --verdict {v}", repo)
         assert "승인" in (repo / run / "timeline.md").read_text()
         commit(repo, "log")
+        # 0.10부터 무거움은 기록 감사까지 승인돼야 병합된다
+        assert "audit: 최종 판정이" in P("merge-check --base main", repo, ok=False).stdout
+        P("verdict --stage audit --verdict APPROVED", repo)
+        commit(repo, "audit")
         assert "✓" in P("merge-check --base main", repo).stdout
+        # 감사 뒤 그 실행의 기록이 바뀌면 다시 감사한다. 판정 덧붙이기·닫기는 괜찮다
+        (repo / run / "00-request/request.md").write_text("바뀐 요청\n")
+        commit(repo, "request changed")
+        assert "audit 승인 뒤 바뀐 파일" in P("merge-check --base main", repo, ok=False).stdout
+        sh("git reset -q --hard HEAD~1", repo)
+        P("verdict --stage dev --verdict READY", repo)
+        P("close-run --note 끝", repo)
+        commit(repo, "close")
+        assert "✓" in P("merge-check --base main", repo).stdout
+        P(f"close-run --run {run} --reopen", repo)
+        sh("git reset -q --hard HEAD~1", repo)
 
         # 문서만 바뀌면 개발·QA 승인은 유지, Wiki 승인은 깨진다
         (repo / "README.md").write_text("doc\n")

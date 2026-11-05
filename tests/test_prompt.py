@@ -13,7 +13,8 @@ ROLE_RULES = {
     "dev-reviewer": ((1, 2, 3, 4, 5, 6, 10, 11), "개발"),
     "wiki-reviewer": ((1, 2, 3, 4, 5), "Wiki"),
     "developer": ((1, 6, 10, 11), None),
-    "qa": ((1, 2, 3, 6, 11), "QA"),
+    "qa": ((1, 2, 3, 6, 11, 15), "QA"),
+    "auditor": ((1, 2, 3, 4, 5, 6, 10), "감사"),
 }
 
 
@@ -31,7 +32,7 @@ def test_prompt_role_rules():
             assert len(excerpt) < len(rules), role
             for name, row in rows.items():
                 assert (row in excerpt) == (name == stage), (role, name)
-            assert ("### 요청 정리: 결정 목록" in excerpt) == (role in ("request-reviewer", "plan-reviewer"))
+            assert ("### 요청 정리: 결정 목록" in excerpt) == (role in ("request-reviewer", "plan-reviewer", "auditor"))
             assert "기준의 우선순위:" in excerpt
             assert "역할 AI는 이 목록부터 읽고" in excerpt
             assert "검수 AI는 읽기 전용이다" in excerpt

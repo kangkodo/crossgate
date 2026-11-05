@@ -10,13 +10,15 @@ ROLE_CHAPTERS = {
     "dev-reviewer": ((1, 2, 3, 4, 5, 6, 10, 11), "개발"),
     "wiki-reviewer": ((1, 2, 3, 4, 5), "Wiki"),
     "developer": ((1, 6, 10, 11), None),
-    "qa": ((1, 2, 3, 6, 11), "QA"),
+    "qa": ((1, 2, 3, 6, 11, 15), "QA"),
+    "auditor": ((1, 2, 3, 4, 5, 6, 10), "감사"),
 }
 CHAPTER_TITLES = {
     14: "토의",
     1: "단계와 역할", 2: "판정 규칙", 3: "루브릭",
     4: "검수 응답 형식 (검수 AI 공통)", 5: "반복 상한과 조정 요청",
-    6: "버전 고정과 기록", 10: "작업 등급", 11: "PM 모드 (작업공간)",
+    6: "버전 고정과 기록", 10: "작업 등급과 작업 유형", 11: "PM 모드 (작업공간)",
+    15: "검증 레시피",
 }
 
 
@@ -45,7 +47,7 @@ def excerpt_rules(rules, role, pm=False):
             request = list(re.finditer(r"^### 요청 정리: 결정 목록$", section, re.M))
             if len(request) != 1:
                 return rules
-            if role not in ("request-reviewer", "plan-reviewer"):
+            if role not in ("request-reviewer", "plan-reviewer", "auditor"):
                 start = request[0].start()
                 following = re.search(r"^### ", section[request[0].end():], re.M)
                 end = request[0].end() + following.start() if following else len(section)

@@ -6,12 +6,12 @@ import math
 import os
 import subprocess
 import time
-from cg.core import config, config_value, current_run, is_pm, load, open_ids, recent_activity, reviews, root, route_conf, run_state
+from cg.core import config, config_value, current_run, is_pm, load, open_ids, recent_activity, required_stages, reviews, root, run_state
 
 
 def stage_rows(cfg, meta, recs):
     """기존 status와 같이 저장소 없는 판정도 별도 묶음으로 읽는다."""
-    for stage in route_conf(cfg, meta.get('route', 'full'))['stages']:
+    for stage in required_stages(cfg, meta):
         repos = sorted({r.get('repo') for r in recs if r['stage'] == stage}, key=lambda x: x or '') or [None]
         for repo in repos:
             records = [r for r in recs if r['stage'] == stage and r.get('repo') == repo]

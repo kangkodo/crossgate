@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import sys
-from cg.core import LABEL, config, git, is_pm, load, match, require_sealed, reviews, root, route_conf
+from cg.core import LABEL, config, git, is_pm, load, match, require_sealed, required_stages, reviews, root
 
 
 def infra_upgrade(base, changed):
@@ -99,6 +99,10 @@ def infra_upgrade(base, changed):
     print(f"✓ 인프라 PR(킷 업그레이드 {old_version} → {new_version})")
 
 
+# 감사 뒤에도 바뀌는 것이 정상인 실행 기록: 판정·호출 원장(덧붙이기), 타임라인(자동 생성), 닫기 기록.
+AUDIT_LEDGER = {"verdicts.jsonl", "timeline.md", "usage.jsonl", "meta.json"}
+
+
 def cmd_merge_check(a):
     require_sealed()
     cfg = config()
@@ -119,7 +123,7 @@ def cmd_merge_check(a):
     run = root() / runs[0]
     recs = load(run)
     meta = json.loads((run / "meta.json").read_text(encoding="utf-8"))
-    stages = route_conf(cfg, meta["route"])["stages"]
+    stages = required_stages(cfg, meta)
     problems = []
     opened = [folder.name for folder, info in discussions(run) if info["status"] == "open"]
     if opened:
@@ -138,9 +142,11 @@ def cmd_merge_check(a):
         if rv[-1].get("unverified"):
             problems.append(f"{st}: 미검증 항목 {rv[-1]['unverified']}")
         # ponytail: request·plan은 버전 대조를 하지 않는다. 기획 문서가 승인 뒤 바뀌는 사고가 나오면 대조 대상에 넣는다.
-        if st in ("dev", "qa", "wiki"):
-            skip = ["ai-log/*"] + (cfg.get("doc_paths", []) if st != "wiki" else [])
-            moved = [f for f in git("diff", "--name-only", rv[-1]["commit"], "HEAD").splitlines() if not match(f, skip)]
+        if st in ("dev", "qa", "wiki", "audit"):
+            skip = ["ai-log/*"] + (cfg.get("doc_paths", []) if st in ("dev", "qa") else [])
+            moved = [f for f in git("diff", "--name-only", rv[-1]["commit"], "HEAD").splitlines()
+                     if not match(f, skip) or (st == "audit" and f.startswith(runs[0] + "/")
+                                               and f[len(runs[0]) + 1:] not in AUDIT_LEDGER)]
             if moved:
                 problems.append(f"{st} 승인 뒤 바뀐 파일: " + ", ".join(moved[:10]))
     if problems:

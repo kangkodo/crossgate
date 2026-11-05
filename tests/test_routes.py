@@ -36,9 +36,9 @@ cat >/dev/null
         sh(cli + "claude dev-reviewer --prompt-file q.md", repo)
         assert "--effort low" in log.read_text().splitlines()[-1]
         # 검수 판정의 모델은 마지막 호출 기록에서 채우고, 손으로 다르게 적으면 알린다
-        P("verdict --stage dev --verdict REJECTED --actor claude --issues D-1=open", repo)
+        P("verdict --stage dev --verdict REJECTED --actor claude --issues D-1=open --contrast D-1", repo)
         assert json.loads((repo / run / "verdicts.jsonl").read_text().splitlines()[-1])["model"] == "claude-opus-5-5"
-        assert "주의: --model" in P("verdict --stage dev --verdict REJECTED --actor claude --model claude-opus-5 --issues D-1=open", repo).stderr
+        assert "주의: --model" in P("verdict --stage dev --verdict REJECTED --actor claude --model claude-opus-5 --issues D-1=open --contrast D-1", repo).stderr
         commit(repo, "verdicts")
         sh(cli + "codex developer --effort medium --prompt-file q.md", repo)
         assert "model_reasoning_effort=medium" in log.read_text().splitlines()[-1], "--effort가 등급보다 우선"
@@ -76,6 +76,6 @@ cat >/dev/null
     old = {"required_stages": ["request", "dev"], "quick_stages": ["request", "dev", "qa"]}
     assert mod.route_conf(old, "quick")["stages"] == ["request", "dev", "qa"]
     assert mod.route_conf(old, "full")["stages"] == ["request", "dev"]
-    assert mod.route_conf({}, "full")["stages"] == ["request", "plan", "dev", "qa", "wiki"]
+    assert mod.route_conf({}, "full")["stages"] == ["request", "plan", "dev", "qa", "wiki", "audit"]
     assert mod.route_conf({"routes": {"light": {"effort": {}}}}, "light")["stages"] == ["request", "dev"]
 

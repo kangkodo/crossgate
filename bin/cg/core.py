@@ -15,11 +15,12 @@ VERDICTS = ["READY", "APPROVED", "REJECTED", "BLOCKED", "PASSED", "FAILED", "ESC
 LABEL = {"READY": "READY", "APPROVED": "승인", "REJECTED": "반려", "BLOCKED": "BLOCKED",
          "PASSED": "PASSED", "FAILED": "FAILED", "ESCALATED": "사람 조정 요청"}
 REVIEW = {"APPROVED", "REJECTED", "PASSED", "FAILED", "BLOCKED"}
-READ_ONLY_ROLES = {"request-reviewer", "plan-reviewer", "wiki-reviewer", "dev-reviewer", "discussant"}
+READ_ONLY_ROLES = {"request-reviewer", "plan-reviewer", "wiki-reviewer", "dev-reviewer", "discussant", "auditor"}
+STAGES = ["request", "plan", "dev", "qa", "wiki", "audit"]
 # 작업 등급: CROSSGATE.md 10장.
 ROUTES = {"light": {"stages": ["request", "dev"], "effort": {"developer": "low", "dev-reviewer": "low"}},
           "standard": {"stages": ["request", "dev"]},
-          "full": {"stages": ["request", "plan", "dev", "qa", "wiki"]}}
+          "full": {"stages": ["request", "plan", "dev", "qa", "wiki", "audit"]}}
 WRITE_ROLES = {"developer", "qa"}
 # ponytail: 정규식 마스킹이라 형식이 특이한 비밀은 놓칠 수 있다. 누락이 나오면 패턴을 늘리거나 gitleaks로 바꾼다.
 SECRET = re.compile(
@@ -107,6 +108,12 @@ def route_conf(cfg, route):
     return r
 
 
+def required_stages(cfg, meta):
+    """이 실행의 필수 단계. 0.10 전에 만든 실행(meta에 kit 없음)에는 감사 단계를 요구하지 않는다."""
+    stages = route_conf(cfg, meta.get("route", "full"))["stages"]
+    return [st for st in stages if st != "audit" or meta.get("kit")]
+
+
 def effort_for(cfg, run, role, engine, override=None):
     """추론 강도: --effort > 이번 실행 등급의 effort > 엔진 설정의 역할별 값 > 엔진 기본값."""
     route = json.loads((run / "meta.json").read_text(encoding="utf-8")).get("route", "full")
@@ -145,7 +152,7 @@ def run_state(run, cfg):
     if "closed" in meta:
         return "닫힘"
     recs = load(run)
-    for stage in route_conf(cfg, meta.get("route", "full"))["stages"]:
+    for stage in required_stages(cfg, meta):
         latest = {}
         for rec in recs:
             if rec["stage"] == stage:
@@ -189,11 +196,14 @@ def current_run(arg=None, writing=False, *, allow_closed=False):
     return run
 
 
-def load(run):
-    f = run / "verdicts.jsonl"
-    if not f.exists():
+def read_jsonl(path):
+    if not path.exists():
         return []
-    return [json.loads(line) for line in f.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def load(run):
+    return read_jsonl(run / "verdicts.jsonl")
 
 
 def reviews(recs, stage, repo=None):

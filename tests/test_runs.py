@@ -92,7 +92,7 @@ def test_rounds_and_caps_by_repository():
         run = P('init-run 회차', repo).stdout.strip()
         def verdict(v, name=None):
             return P('verdict --stage dev --verdict ' + v +
-                     (' --repo ' + name if name else '') + ' --issues D-1=open', repo).stdout
+                     (' --repo ' + name if name else '') + ' --issues D-1=open --contrast D-1', repo).stdout
         verdict('REJECTED', '가')
         verdict('REJECTED', '나')
         verdict('BLOCKED', '가')

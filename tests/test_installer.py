@@ -7,7 +7,7 @@ from helpers import KIT
 
 DEFAULTS = {
     "recent_minutes": 60,
-    "timeouts": {"call_minutes": {"default": 20, "developer": 40, "qa": 40}, "stall_seconds": 180},
+    "timeouts": {"call_minutes": {"default": 20, "developer": 40, "qa": 40, "probe": 10}, "stall_seconds": 180},
     "parallel": {"max": 3},
     "resume_reviews": True,
     "docs": {"root": "docs", "index": "INDEX.md", "exclude": []},

@@ -1,6 +1,6 @@
 from cg.discussion import summary
 import json
-from cg.core import LABEL, at, config, config_value, current_run, escalation, load, open_ids, read_usage, reviews, root, run_state
+from cg.core import LABEL, STAGES, at, config, config_value, current_run, escalation, load, open_ids, read_usage, reviews, root, run_state
 
 
 def cmd_status(a):
@@ -18,7 +18,7 @@ def cmd_status(a):
             print(f"  {engine} 호출 {len(cs)}회 · 입력 {sum(c['input_tokens'] for c in cs):,} · 출력 "
                   f"{sum(c['output_tokens'] for c in cs):,} 토큰 · {sum(c['seconds'] for c in cs)}초"
                   + (f" · ${cost:.2f}" if cost else ""))
-    for st in ["request", "plan", "dev", "qa", "wiki"]:
+    for st in STAGES:
         repos = sorted({x.get("repo") for x in recs if x["stage"] == st}, key=lambda x: x or "") or [None]
         for repo in repos:
             rv = reviews(recs, st, repo)

@@ -42,7 +42,9 @@ def test_resume_next_actions_and_read_only():
             (approved + [record('plan', 'ESCALATED'), record('plan', 'APPROVED', 'user')],
              'dev: 그 단계 시작 또는 검수 요청'),
             (approved + [record(s, 'PASSED' if s == 'qa' else 'APPROVED')
-                         for s in ('plan', 'dev', 'qa', 'wiki')], '병합 조건 검사 후 병합'),
+                         for s in ('plan', 'dev', 'qa', 'wiki')], 'audit: 그 단계 시작 또는 검수 요청'),
+            (approved + [record(s, 'PASSED' if s == 'qa' else 'APPROVED')
+                         for s in ('plan', 'dev', 'qa', 'wiki', 'audit')], '병합 조건 검사 후 병합'),
             (approved + [record('plan', 'APPROVED'), record('dev', 'APPROVED'), record('qa', 'FAILED')],
              'qa: 수정 후 재검수'),
         ]

@@ -3,7 +3,7 @@
   "codex": {
     "model": "gpt-6-astra",
     "default_effort": "medium",
-    "effort": { "request-reviewer": "medium", "plan-reviewer": "medium", "developer": "medium", "qa": "medium", "wiki-reviewer": "low" },
+    "effort": { "request-reviewer": "medium", "plan-reviewer": "medium", "developer": "medium", "qa": "medium", "wiki-reviewer": "low", "auditor": "medium" },
     "network": false,
     "ephemeral": false
   },
@@ -12,7 +12,7 @@
   "cap": 3,
   "recent_minutes": 60,
   "timeouts": {
-    "call_minutes": { "default": 20, "developer": 40, "qa": 40 },
+    "call_minutes": { "default": 20, "developer": 40, "qa": 40, "probe": 10 },
     "stall_seconds": 180
   },
   "parallel": { "max": 3 },
@@ -28,9 +28,10 @@
   "routes": {
     "light": { "stages": ["request", "dev"], "effort": { "developer": "low", "dev-reviewer": "low" } },
     "standard": { "stages": ["request", "dev"] },
-    "full": { "stages": ["request", "plan", "dev", "qa", "wiki"] }
+    "full": { "stages": ["request", "plan", "dev", "qa", "wiki", "audit"] }
   },
-  "qa": { "runner": "codex", "acceptance": "tests/acceptance" },
+  "qa": { "runner": "codex", "acceptance": "tests/acceptance", "recipe": null },
+  "probe": { "commands": [] },
   "deploy": {
     "preview": "git fetch origin && git log --oneline origin/release..origin/main",
     "command": "git push origin origin/main:refs/heads/release"

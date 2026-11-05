@@ -26,7 +26,7 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 |---|---|
 | 가벼움 | 1(요청 한두 줄, 결정 목록은 `질문`이 있을 때만) → 3(TODO 없이, 전후 캡처 포함) → 6 |
 | 보통 | 1 → 2의 1번(TODO만, 검수 없음) → 3(TODO의 영향 문서는 Master가 `roles/wiki-writer.md`대로 고쳐 같은 diff로 검수받는다) → 6 |
-| 무거움 | 1 → 2 → 3 → 4 → 5 → 6 |
+| 무거움 | 1 → 2 → 3 → 4 → 5 → 5-1(기록 감사) → 6 |
 
 진행 중 승격 조건(CROSSGATE.md 10장)에 걸리면 `$P route <올린 등급>`을 실행하고 사용자에게 알린 뒤, 건너뛴 절을 보충한다.
 
@@ -34,7 +34,7 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 
 목표는 사용자에게 **한 번에** 묻고, 승인 뒤에는 묻지 않는 것이다(`CROSSGATE.md` 1장 "요청 정리: 결정 목록").
 
-1. 관련 코드·문서를 먼저 조사한다. 대화를 바탕으로 `00-request/request.md`의 목표·요구·하지 않을 일을 채우고, 1장 2~3번대로 결정 목록을 만든다.
+1. 관련 코드·문서를 먼저 조사한다. 대화를 바탕으로 `00-request/request.md`의 유형(10장 작업 유형)·목표·요구·하지 않을 일을 채우고, 1장 2~3번대로 결정 목록을 만든다. 사용자에게 묻기 전에 결정마다 실행해 보면 답이 나오는지 먼저 따진다. 나오면 `실험`으로 처리한다: 읽기 전용 확인은 Master가 직접 하고, 쓰기가 필요하면 개발 역할에 실험 지시(결과만 남기고 코드는 버린다)로 맡긴 뒤 결과를 근거 칸에 적는다.
 2. 보통·무거움: `request.md`를 커밋하고 요청 검수 지시 파일(`00-request/review-request-N.md`, 읽을 것: request.md와 관련 코드·문서 경로)을 써서 `$P codex request-reviewer --prompt-file <그 파일>`. 판정을 `$P verdict --stage request --verdict APPROVED|REJECTED --actor codex --issues "I-1=open,..."`로 기록하고, 찾은 결정을 목록에 합친다. 가벼움은 건너뛴다.
 3. `질문` 전부와 허락이 필요한 행동을 **한 묶음으로** 묻는다. 선택지가 있으면 AskUserQuestion(질문 4개·선택지 2~4개까지, 추천을 첫째에)을 쓰고 넘치면 여러 번에 나눠 이어서 묻는다. 열린 질문은 글로 묻는다. 중간에 작업을 시작하지 않는다.
 4. 답을 결정 목록·허락 범위·사용자 확인 기록에 적고 커밋한 뒤 `$P verdict --stage request --verdict APPROVED --actor user --note "<결정 N건 중 질문 M건 / 질문 없음>"`.
@@ -59,13 +59,19 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 5. 보통은 Master가 `roles/wiki-writer.md`대로 영향 문서를 갱신하고 `$P docs-check`를 돌린다. 통과한 변경을 커밋하고 `$P verdict --stage dev --verdict READY --actor codex`로 기록한다.
 6. 가벼움은 후 캡처를 찍어 전후를 비교한다. 바뀐 요소와 공유 스타일을 쓰는 대표 화면이 실제로 보여야 한다. 의도하지 않은 변화가 있으면 승격한다.
 7. `git diff BASE..HEAD -- . ':!ai-log' > <run>/raw/dev-diff-N.patch`로 전체 변경을 만든다. 동시 개발도 합친 뒤 한 번 검수한다. 작업 AI의 답변·자체 평가는 검수에 넘기지 않는다.
-8. 검수 지시의 읽을 것에 diff·TODO·관련 코드를 넣고, 보통은 결정 목록, 가벼움은 전후 캡처를 더한다. 보통·무거움은 완료 근거의 안전 근거 테스트가 돈 실행 결과(gate 로그나 Master가 돌린 출력, `raw/`)를 더한다. 재검수는 `$P status`에 나온 이전 반려 커밋부터의 `git diff <커밋>..HEAD -- . ':!ai-log'`를 delta 파일로 저장하고 이전 지적과 함께 앞세운다(R14).
+8. 검수 지시에 등급과 유형을 적고, 읽을 것에 diff·TODO·관련 코드를 넣고, 보통은 결정 목록, 가벼움은 전후 캡처를 더한다. 보통·무거움은 완료 근거의 안전 근거 테스트가 돈 실행 결과(gate 로그나 Master가 돌린 출력, `raw/`)를 더한다. 재검수는 `$P status`에 나온 이전 반려 커밋부터의 `git diff <커밋>..HEAD -- . ':!ai-log'`를 delta 파일로 저장하고 이전 지적과 함께 앞세운다(R14).
 9. `$P claude dev-reviewer --prompt-file <검수 지시>`로 읽기 전용 검수를 맡긴다. 명령을 쓸 수 없을 때만 읽기 도구를 가진 `crossgate-reviewer` 에이전트를 쓰며, 미등록이면 읽기 전용 에이전트에 `.claude/agents/crossgate-reviewer.md`를 넘긴다. 대체 사실을 판정 비고에 적는다.
-10. `$P verdict --stage dev ... --actor claude`로 판정을 기록한다. 반려면 1번으로 돌아간다. 시간 초과·멈춤(종료 코드 3)이면 BLOCKED로 기록한다.
+10. 반려면 차단 지적을 근거 종류로 나눈다(R15).
+    - 실행 지적은 응답의 재현 패치를 `02-development/probe-<ID>-N.patch`로 저장하고 `$P probe --finding <ID> --cmd "<재현>" --expect "<실패 표시>" [--patch <파일>] [--baseline <커밋>] --run <실행>`으로 검수한 커밋에서 돌린다. 재현되면 그대로 둔다.
+    - 재현이 안 되면 `raw/probe_*.log`를 검수 세션에 한 번 돌려(같은 `$P claude dev-reviewer`, 이번 지시만) 재현을 고치거나 철회하게 한다. 그래도 안 되면 그 지적을 권고로 내린다. 환경 때문에 못 돌리면(종료 코드 3) 그 회차를 BLOCKED로 기록한다. 종료 코드 2는 명령·커밋·패치 경로를 잘못 준 것이니 고쳐서 다시 돌린다.
+    - 대조 지적은 `--contrast <ID>...`로 밝힌다.
+11. `$P verdict --stage dev ... --actor claude [--contrast <ID>...]`로 판정을 기록한다. 재현 기록이 없는 실행 지적이 남아 있으면 명령이 거부한다. 반려면 1번으로 돌아가고, 다음 지시의 이전 차단 지적에 재현 명령을 함께 넣는다. 시간 초과·멈춤(종료 코드 3)이면 BLOCKED로 기록한다.
+12. `verdict`가 "전제 확인"을 출력하면(같은 지적이 두 회차 연속 남음) 다음 지시 전에 지금까지의 수정이 기댄 전제를 한 줄로 적고, 그 전제가 틀리면 실패할 확인(재현·로그·작은 실험)을 먼저 돌린다. 결과를 지시의 읽을 것에 넣는다. 요구가 원인이면 2(기획)로 간다.
+13. 재검수 때는 이전 실행 지적의 재현 명령을 새 커밋에서 다시 돌려 결과를 검수 지시에 넣는다(통과하면 해결).
 
 ## 4. 독립 QA (`qa`) — Codex
 
-1. QA 지시 파일에 수용 기준, 실행 방법(웹 URL 또는 Android 기기), 이번 변경 요약을 적고: `$P codex qa --prompt-file <그 파일>`. (Android는 `config.qa.runner`가 `artemis`면 Master가 ARTEMIS로 직접 수행한다.)
+1. QA 지시 파일에 수용 기준, 실행 방법(웹 URL 또는 Android 기기), 이번 변경 요약을 적고, 검증 레시피(`config.qa.recipe`)가 있으면 읽을 것 첫 줄에 넣은 뒤: `$P codex qa --prompt-file <그 파일>`. (Android는 `config.qa.runner`가 `artemis`면 Master가 ARTEMIS로 직접 수행한다.)
 2. `03-qa/report.md`와 캡처를 **직접 표본으로 골라** 확인한다. 고위험 기준은 전부 본다.
 3. 기록: `$P verdict --stage qa --verdict PASSED|FAILED|BLOCKED --actor codex --evidence 03-qa/report.md ...`.
 4. FAILED면 결함 원인을 나눈다. 요구 오류는 2(기획)로, 그 외는 복구 TODO를 추가해 3(개발)으로 간다. 횟수는 초기화하지 않는다.
@@ -75,9 +81,15 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 1. `roles/wiki-writer.md`대로 영향 문서를 갱신하고 `04-wiki/summary.md`를 쓴다. `$P docs-check`로 목차·상대 링크·앵커·위키링크를 점검하고 문제를 고친 뒤 커밋한다. READY를 기록한다. 목차가 필수이면 `--require-index`를 붙인다.
 2. `$P codex wiki-reviewer --prompt-file <지시 파일>`로 검수를 받고 판정을 기록한다. 재검수면 이전 지적과 바뀐 문서·절만 추려 넣는다(R14).
 
+## 5-1. 기록 감사 (`audit`) — 무거움만, Codex 읽기 전용
+
+1. 모든 기록을 커밋한 뒤 `06-audit/audit-request-N.md`를 쓴다. 읽을 것: `request.md`, `todo.md`, `verdicts.jsonl`, `timeline.md`, `probes.jsonl`, `03-qa/report.md`, `raw/`의 검수 응답·게이트 로그 경로.
+2. `$P codex auditor --prompt-file <그 파일>`로 감사를 맡기고 `$P verdict --stage audit --verdict APPROVED|REJECTED|BLOCKED --actor codex --issues "A-n=open,..."`로 기록한다.
+3. 반려면 기록을 지우거나 고쳐 쓰지 않는다. 잘못 적은 판정은 바로잡는 판정을 새로 기록하고(비고에 이유), 빠진 근거·확인은 채운 뒤 다시 감사를 받는다. Master의 판단이 사용자 결정이었으면 사용자에게 묻는다.
+
 ## 6. 병합
 
-1. 실행을 닫을 때는 ai-log의 마지막 커밋 전에 `$P close-run --note "작업 완료"`를 실행한다. ai-log를 커밋하고 브랜치를 푸시한 뒤 PR을 만든다(`gh pr create`). 본문에는 요청 요약, 판정 타임라인 링크, QA 증거 요약을 넣는다.
+1. 실행을 닫을 때는(무거움은 감사 승인 뒤) ai-log의 마지막 커밋 전에 `$P close-run --note "작업 완료"`를 실행한다. ai-log를 커밋하고 브랜치를 푸시한 뒤 PR을 만든다(`gh pr create`). 본문에는 요청 요약, 판정 타임라인 링크, QA 증거 요약을 넣는다.
 2. `$P merge-check --base origin/<기준 브랜치>`.
    - 통과: `gh pr merge --auto --squash`. 병합되면 사용자에게 한 줄로 보고한다: 무엇이 병합됐는지 · PR 링크 · 되돌리기 `git revert <sha>`.
    - 실패: 사유를 그대로 보여주고 병합할지 사용자에게 묻는다.
@@ -117,7 +129,7 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 
 설계 선택이 갈리거나 원인이 불명인 결함, 같은 지적의 검수 왕복, 사용자 요청에 쓴다. 단순 구현·문구 수정에는 쓰지 않는다. 어느 단계에서나 선택적으로 열며 등급의 필수 단계나 판정을 대신하지 않는다. Master는 발언자가 아니라 진행자다.
 
-1. `templates/discussion-topic.md`로 질문·배경·읽을 것·범위 밖·결정할 것을 적고 `$P discuss open <slug> --topic-file <파일> --run <실행>`으로 연다.
+1. `templates/discussion-topic.md`로 질문·배경·읽을 것·범위 밖·판단 기준·결정할 것을 적고(판단 기준은 발제 전에 정하고 바꾸지 않는다) `$P discuss open <slug> --topic-file <파일> --run <실행>`으로 연다.
 2. `$P discuss round <slug> --prompt-file <지시> --run <실행>`으로 독립 발제한다. 라운드 1은 전원 동시·새 세션이며 상대 발언을 읽지 않는다.
 3. 갈린 지점·확인할 사실을 `$P discuss issue <slug> --id T-n --status open --title "<쟁점>" --run <실행>`으로 등록한다.
 4. 같은 `round` 명령으로 반박한다. 자기 토의 세션만 이어 쓰고 상대 원문 경로·장부는 도구가 붙인다. 필요하면 `--sequential`로 앞 참가자의 이번 라운드 발언까지 넘긴다. 실패한 참가자만 `--only <이름,이름>`으로 같은 라운드를 다시 부른다.
@@ -127,7 +139,24 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 
 `$P discuss status [<slug>] --run <실행>`으로 토의·라운드·쟁점·마지막 발언을 본다. `status`·`resume`에도 열린 토의가 표시되며 정식 모드의 `merge-check`는 열린 토의가 있으면 실패한다.
 
+## 검증 레시피
+
+QA나 화면 확인이 필요한 작업이 두 번째로 왔는데 `config.qa.recipe`가 없으면, 레시피 작성(`templates/verify.md` 형식, 보통 등급)을 사용자에게 제안한다. 레시피가 있으면 QA·전후 캡처·재현 지시의 읽을 것에 넣는다. QA가 레시피와 실제 앱의 차이를 보고하면 고치는 작업을 따로 제안한다(CROSSGATE.md 15장).
+
+## 회고
+
+사용자가 요청하거나 닫힌 실행이 10개 쌓일 때마다 한다(CROSSGATE.md 16장).
+
+1. `$P retro [--days <수>]`로 단계별 검수·첫 통과·반려·BLOCKED·조정 요청, 두 회차 연속 남은 지적, 재현 결과, 호출량을 본다.
+2. 보존 기한 안의 검수 응답(`raw/`)과 판정 비고에서 같은 종류의 실수를 묶는다. 두 번 이상 나온 것만 친다.
+3. 종류마다 가장 높은 층의 해법을 고른다: 구조 → 타입·lint·검사 → 테스트 → 문서. 더 높은 층이 안 되는 이유를 적는다.
+4. 숫자가 무엇 때문에 그렇게 나왔는지 함께 적어 사용자에게 제안한다. 고른 것만 하나씩 별도 실행으로 처리한다. 새 검사는 실제로 있었던 실수에서 실패해야 한다.
+5. 크로스게이트 규칙 자체의 문제는 프로젝트 사실을 빼고 일반화해 원본 개선으로 제안한다.
+
 ## 늘 지킬 것
+
+- 사용자에게 보고할 때는 주장마다 근거를 붙인다: 측정(실행 결과·로그·기록) / 추론 / 추측. 직접 돌릴 수 있는 확인을 사용자에게 넘기지 않는다. 바뀐 점은 그 결과를 쓰는 사람과 다음에 이 코드를 맡을 사람에게 무엇이 달라지는지부터 쓴다. 제안이 가치가 없으면 그렇다고 말한다.
+- 다른 작업 방식 스킬(자율 진행이나 PR을 전제하는 모드 스킬 등)은 크로스게이트 실행 안에서 켜지 않는다. 조사·설명용 개별 스킬은 쓸 수 있지만 결과는 근거일 뿐 판정·결정 목록을 대신하지 않는다.
 
 - 토의 참가자는 `$P discuss round`로만 부른다. `codex exec`로 직접 부르지 않는다.
 - 판정·호출 기록은 `crossgate` 명령으로만 쓴다. 요청서·TODO·지시 파일은 Master가 작성한다. 검수 AI에게 쓰기 권한을 주지 않는다.
