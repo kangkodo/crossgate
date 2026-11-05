@@ -80,7 +80,7 @@ Master가 등급을 추천하고 사용자가 확정한다. 코드를 먼저 조
 | `resume [--run <실행>]` | 단계·회차·미해결 지적·중단된 호출·다음 할 일 확인 |
 | `codex <역할> --prompt-file <파일> [--fresh]` / `claude <역할> --prompt-file <파일> [--fresh]` | 역할 호출. 검수는 성공한 세션을 이어 쓰며 `--fresh`로 새로 시작 |
 
-호출은 시작·끝과 강도 출처·세션·상태를 기록한다. 기본 시간 제한은 20분(개발·QA 40분), Codex 첫 작업 이벤트 대기는 180초다. 설정 `timeouts`(재현은 `probe`, 기본 10분), `parallel`(기본 최대 3), `docs`, `resume_reviews`(기본 true), `recent_minutes`(기본 60), `probe.commands`(재현에 허용할 명령 접두어, 없으면 gate 명령), `qa.recipe`(검증 레시피 경로, 형식은 `templates/verify.md`)로 조정한다. 옛 설정은 빠진 항목의 기본값으로 동작한다. 업그레이드 PR은 태그 출처·봉인·변경 범위·버전 조건과 필수 검사가 통과하면 자동 병합한다.
+호출은 시작·끝과 강도 출처·세션·상태를 기록한다. 기본 시간 제한은 20분(개발·QA 40분), Codex 첫 작업 이벤트 대기는 180초다. 설정 `timeouts`(재현은 `probe`, 기본 10분), `parallel`(기본 최대 3), `docs`, `resume_reviews`(기본 true), `recent_minutes`(기본 60), `probe.commands`(재현에 허용할 명령 접두어, 없으면 gate 명령), `probe.sandbox`(macOS 샌드박스, 기본 `auto`), `probe.network`(재현에 네트워크 허용, 기본 false), `qa.recipe`(검증 레시피 경로, 형식은 `templates/verify.md`)로 조정한다. 옛 설정은 빠진 항목의 기본값으로 동작한다. 업그레이드 PR은 태그 출처·봉인·변경 범위·버전 조건과 필수 검사가 통과하면 자동 병합한다.
 
 ### 토의
 

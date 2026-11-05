@@ -62,7 +62,7 @@ description: 크로스게이트(AI 교차검수 개발 파이프라인)의 Maste
 8. 검수 지시에 등급과 유형을 적고, 읽을 것에 diff·TODO·관련 코드를 넣고, 보통은 결정 목록, 가벼움은 전후 캡처를 더한다. 보통·무거움은 완료 근거의 안전 근거 테스트가 돈 실행 결과(gate 로그나 Master가 돌린 출력, `raw/`)를 더한다. 재검수는 `$P status`에 나온 이전 반려 커밋부터의 `git diff <커밋>..HEAD -- . ':!ai-log'`를 delta 파일로 저장하고 이전 지적과 함께 앞세운다(R14).
 9. `$P claude dev-reviewer --prompt-file <검수 지시>`로 읽기 전용 검수를 맡긴다. 명령을 쓸 수 없을 때만 읽기 도구를 가진 `crossgate-reviewer` 에이전트를 쓰며, 미등록이면 읽기 전용 에이전트에 `.claude/agents/crossgate-reviewer.md`를 넘긴다. 대체 사실을 판정 비고에 적는다.
 10. 반려면 차단 지적을 근거 종류로 나눈다(R15).
-    - 실행 지적은 응답의 재현 패치를 `02-development/probe-<ID>-N.patch`로 저장하고 `$P probe --finding <ID> --cmd "<재현>" --expect "<실패 표시>" [--patch <파일>] [--baseline <커밋>] --run <실행>`으로 검수한 커밋에서 돌린다. 재현되면 그대로 둔다.
+    - 실행 지적은 응답의 재현 패치를 `02-development/probe-<ID>-N.patch`로 저장한다. 샌드박스가 없는 컴퓨터(`probe`가 경고함)에서는 패치를 먼저 읽고, 재현과 무관한 파일(패키지 스크립트·빌드 설정·CI·비밀값)을 고치거나 밖으로 보내는 코드가 있으면 돌리지 않고 그 지적을 권고로 내린다. 그다음 `$P probe --finding <ID> --cmd "<재현>" --expect "<실패 표시>" [--patch <파일>] [--baseline <커밋>] --run <실행>`으로 검수한 커밋에서 돌린다. 재현되면 그대로 둔다.
     - 재현이 안 되면 `raw/probe_*.log`를 검수 세션에 한 번 돌려(같은 `$P claude dev-reviewer`, 이번 지시만) 재현을 고치거나 철회하게 한다. 그래도 안 되면 그 지적을 권고로 내린다. 환경 때문에 못 돌리면(종료 코드 3) 그 회차를 BLOCKED로 기록한다. 종료 코드 2는 명령·커밋·패치 경로를 잘못 준 것이니 고쳐서 다시 돌린다.
     - 대조 지적은 `--contrast <ID>...`로 밝힌다.
 11. `$P verdict --stage dev ... --actor claude [--contrast <ID>...]`로 판정을 기록한다. 재현 기록이 없는 실행 지적이 남아 있으면 명령이 거부한다. 반려면 1번으로 돌아가고, 다음 지시의 이전 차단 지적에 재현 명령을 함께 넣는다. 시간 초과·멈춤(종료 코드 3)이면 BLOCKED로 기록한다.

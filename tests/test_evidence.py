@@ -225,3 +225,38 @@ def test_proof_and_contrast_are_exclusive():
         assert v.get("proofs", {}) == {} and v["contrast"] == ["D-1"]
         f = json.loads(P("retro --json", repo).stdout)["dev_findings"]
         assert f == {"blocking": 1, "proven": 0, "contrast": 1}
+
+
+def test_probe_sandbox_confines_writes_network_and_secrets():
+    import sys
+    import uuid
+    if sys.platform != "darwin":
+        return
+    with tempfile.TemporaryDirectory() as d:
+        repo, run = setup(d)
+        escape = Path.home() / f".crossgate-probe-escape-{uuid.uuid4().hex[:8]}"
+        (repo / "check.sh").write_text(
+            f'echo pwned > "{escape}" 2>&1 || echo write-denied\n'
+            'env | grep -c FAKE_API_KEY || true\n'
+            "python3 -c \"import socket\ntry:\n socket.create_connection(('1.1.1.1', 443), timeout=3); print('net-open')\n"
+            "except Exception: print('net-blocked')\"\n"
+            'echo BUG; exit 1\n')
+        patch = run / "02-development" / "escape.patch"
+        patch.write_text(sh("git diff -- check.sh", repo).stdout)
+        sh("git checkout -- check.sh", repo)
+        try:
+            sh(f'FAKE_API_KEY=s3cr3t python3 .crossgate/kit/bin/crossgate probe --finding D-1 --cmd "sh check.sh" '
+               f'--expect BUG --patch {patch}', repo)
+            log = (repo / probes(run)[-1]["log"]).read_text()
+            assert not escape.exists(), "샌드박스는 일회용 워크트리·임시 폴더 밖 쓰기를 막는다"
+            assert "write-denied" in log and "net-blocked" in log and "net-open" not in log
+            assert "\n0\n" in log, "비밀처럼 보이는 환경 변수는 재현 명령에 넘기지 않는다"
+            assert probes(run)[-1]["sandbox"] == "macos"
+        finally:
+            escape.unlink(missing_ok=True)
+        cfg = json.loads((repo / ".crossgate/config.json").read_text())
+        cfg["probe"]["sandbox"] = False
+        (repo / ".crossgate/config.json").write_text(json.dumps(cfg))
+        commit(repo, "sandbox off")
+        P('probe --finding D-2 --cmd "sh check.sh" --expect "없는 표시"', repo, ok=False)
+        assert probes(run)[-1]["sandbox"] == "none"

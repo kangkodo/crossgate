@@ -25,6 +25,6 @@
       "protected": ["tests/acceptance/*"]
     }
   },
-  "probe": { "commands": [] },
+  "probe": { "commands": [], "sandbox": "auto", "network": false },
   "raw_retention_days": 30
 }

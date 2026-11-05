@@ -31,7 +31,7 @@
     "full": { "stages": ["request", "plan", "dev", "qa", "wiki", "audit"] }
   },
   "qa": { "runner": "codex", "acceptance": "tests/acceptance", "recipe": null },
-  "probe": { "commands": [] },
+  "probe": { "commands": [], "sandbox": "auto", "network": false },
   "deploy": {
     "preview": "git fetch origin && git log --oneline origin/release..origin/main",
     "command": "git push origin origin/main:refs/heads/release"
