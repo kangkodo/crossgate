@@ -309,3 +309,46 @@ def test_probe_refuses_without_sandbox_unless_turned_off():
             except SystemExit as e:
                 assert e.code == 2
         assert probe.sandbox({"probe": {"sandbox": False}}, Path("/x"), Path("/y")) == (None, "none")
+
+
+def test_probe_sandbox_reads_never_reopen_the_repository():
+    """PATH의 `.`·`<저장소>/bin`·저장소로 가는 링크·여러 저장소를 담은 폴더의 bin이 저장소 읽기 금지를 풀지 않는다."""
+    import os
+    import subprocess
+    import sys
+    from unittest.mock import patch
+    from helpers import KIT
+    sys.path.insert(0, str(KIT / "bin"))
+    from cg.commands import probe
+    with tempfile.TemporaryDirectory() as d:
+        home = Path(d).resolve() / "home"
+        repo = home / "work" / "projects" / "repo"
+        (repo / "bin").mkdir(parents=True)
+        sh("git init -q", repo)
+        (repo / ".env").write_text("SECRET=1\n")
+        (repo / "bin" / "tool").write_text("#!/bin/sh\n")
+        shared = home / "work" / "projects" / "bin"   # 부모(projects)가 저장소를 담는다
+        shared.mkdir()
+        links = home / ".local" / "bin"
+        links.mkdir(parents=True)
+        (links / "tool").symlink_to(repo / "bin" / "tool")
+        path = os.pathsep.join([".", "bin", str(repo / "bin"), str(shared), str(links), "/usr/bin"])
+        cwd = os.getcwd()
+        try:
+            os.chdir(repo)
+            with patch.dict(os.environ, {"PATH": path}), patch.object(probe.Path, "home", return_value=home):
+                roots = probe.tool_roots(home)
+                assert repo in roots, "고치기 전의 구멍이 이 PATH로 재현돼야 검사가 의미 있다"
+                cmd, name = probe.sandbox({}, Path(d) / "box", repo) if sys.platform == "darwin" else (None, None)
+        finally:
+            os.chdir(cwd)
+        reads = probe.safe_reads(roots, home, [repo, repo / ".git"])
+        assert links in reads, "홈 안의 도구 폴더는 그대로 연다"
+        for r in reads:
+            assert not probe.within(r, repo) and not probe.within(repo, r), r
+            assert not probe.within(home, r), r
+        if cmd:  # macOS: 만든 프로필로 실제로 읽어 본다
+            out = subprocess.run(cmd + ["/bin/cat", str(repo / ".env")], capture_output=True, text=True)
+            assert "SECRET" not in out.stdout and out.returncode, out
+            out = subprocess.run(cmd + ["/bin/cat", str(repo / ".git" / "config")], capture_output=True, text=True)
+            assert out.returncode, ".git/config도 막힌다"

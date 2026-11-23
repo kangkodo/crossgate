@@ -80,7 +80,8 @@ def tool_roots(home):
 
     for entry in os.environ.get("PATH", "").split(os.pathsep):
         d = Path(entry).expanduser()
-        if not entry or not d.is_dir():
+        # 상대 항목(`.`, `bin`)은 이 프로세스의 작업 폴더, 곧 본 저장소로 풀린다. 재현 안에서는 복사본 기준이라 열 필요가 없다.
+        if not entry or not d.is_absolute() or not d.is_dir():
             continue
         for cand in (d, d.resolve()):
             add(cand)
@@ -98,6 +99,21 @@ def tool_roots(home):
     for rel in TOOL_DIRS:
         add(home / rel)
     return roots
+
+
+def within(path, folder):
+    """path가 folder와 같거나 그 안에 있다."""
+    return path == folder or folder in path.parents
+
+
+def safe_reads(reads, home, guarded):
+    """읽기 허용 후보에서 막을 곳을 다시 여는 항목을 뺀다.
+
+    SBPL은 뒤 규칙이 이기므로, 막은 폴더(본 저장소·git 공통 폴더)와 같거나 그 안이나 그 위인 폴더를 열면 막은 것이 풀린다.
+    홈은 도구 폴더가 그 안에 있으므로 홈과 같거나 그 위인 것만 뺀다.
+    """
+    return {r for r in reads
+            if not within(home, r) and not any(within(r, g) or within(g, r) for g in guarded)}
 
 
 def sandbox(cfg, base, target):
@@ -125,11 +141,13 @@ def sandbox(cfg, base, target):
         return "".join(f'(subpath "{q(x)}")' for x in sorted(set(items), key=str))
 
     home = Path.home().resolve()
-    reads = set(tool_roots(home))
     common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], cwd=target,
                             capture_output=True, text=True).stdout.strip()
+    # 본 저장소와 git 공통 폴더(저장소가 홈 밖이고 대상이 연결된 워크트리일 때 따로 떨어져 있다)는 읽지 못하게 한다.
+    guarded = [Path(target).resolve()] + ([Path(common).resolve()] if common else [])
+    reads = safe_reads(tool_roots(home), home, guarded)
     if common:
-        reads.add(Path(common).resolve() / "objects")  # 공유 clone이 빌려 쓰는 객체만. config·hooks는 읽지 않는다
+        reads.add(guarded[-1] / "objects")  # 공유 clone이 빌려 쓰는 객체만. config·hooks는 읽지 않는다
     reads |= {Path(os.path.expanduser(str(x))).resolve() for x in config_value(cfg, "probe.read_allow", []) or []}
     network = bool(config_value(cfg, "probe.network", False))
     rules = ["(version 1)", "(allow default)", "(deny appleevent-send)",
@@ -140,7 +158,7 @@ def sandbox(cfg, base, target):
     if not network:
         rules.append("(deny network*)")
     # 본 저장소는 홈 밖에 있어도 읽지 못하게 한다(.git/config의 토큰, 추적하지 않는 .env). 객체만 빌려 쓴다.
-    rules.append(f'(deny file-read-data (subpath "{q(home)}") (subpath "{q(Path(target).resolve())}"))')
+    rules.append("(deny file-read-data " + paths([home] + guarded) + ")")
     if reads:
         rules.append("(allow file-read-data " + paths(reads) + ")")
     rules.append(f'(allow file-read-data (subpath "{q(base.resolve())}"))')
