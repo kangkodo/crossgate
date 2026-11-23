@@ -20,7 +20,7 @@ The name comes from *cross* (review by a different model) and *gate* (each stage
 - git
 - [Claude Code](https://claude.com/claude-code)
 - The Codex CLI, signed in
-- macOS for the `probe` sandbox (`sandbox-exec`). On other systems `probe` warns, records `sandbox: none`, and the Master reads the reproduction patch before running it.
+- macOS for the `probe` sandbox (`sandbox-exec`). On other systems `probe` refuses to run until you set `probe.sandbox` to `false`. It then runs unconfined and records `sandbox: none`, so the Master reads the reproduction patch first.
 
 ## Install
 

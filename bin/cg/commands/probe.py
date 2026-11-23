@@ -114,10 +114,9 @@ def sandbox(cfg, base, target):
         return None, "none"
     exe = shutil.which("sandbox-exec") if sys.platform == "darwin" else None
     if not exe:
-        if mode is True:
-            refuse("probe.sandbox 가 켜져 있지만 이 컴퓨터에서 쓸 수 있는 샌드박스(macOS sandbox-exec)가 없습니다.")
-        print("주의: 샌드박스 없이 재현합니다. 재현 패치를 먼저 읽고 돌리세요(CROSSGATE.md 6장).", file=sys.stderr)
-        return None, "none"
+        # 샌드박스가 없으면 돌리지 않는다. 가두지 않고 돌리려면 설정에서 명시적으로 끈다.
+        refuse("이 컴퓨터에서 쓸 수 있는 샌드박스(macOS sandbox-exec)가 없어 재현을 돌리지 않습니다. 재현 패치를 읽은 뒤 "
+               "가두지 않고 돌리려면 .crossgate/config.json 의 probe.sandbox 를 false 로 두세요(CROSSGATE.md 6장).")
 
     def q(path):
         return str(path).replace("\\", "\\\\").replace('"', '\\"')

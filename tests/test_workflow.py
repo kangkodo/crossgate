@@ -56,6 +56,19 @@ def test_flow():
         assert "✓" in P("merge-check --base main", repo).stdout
         P(f"close-run --run {run} --reopen", repo)
         sh("git reset -q --hard HEAD~1", repo)
+        # meta.json을 고쳐 필수 단계를 줄일 수 없다: 등급 낮추기, kit 지우기, 감사 뒤 닫기 말고 다른 필드 변경
+        meta_file = repo / run / "meta.json"
+        original = meta_file.read_text()
+        for change, message in [(lambda m: m.update(route="light"), "등급이 실행을 만든 뒤 낮아짐"),
+                                (lambda m: m.pop("kit"), "kit이 실행을 만든 뒤 바뀜"),
+                                (lambda m: m.update(slug="x"), "audit 승인 뒤 바뀐 파일")]:
+            meta = json.loads(original)
+            change(meta)
+            meta_file.write_text(json.dumps(meta))
+            commit(repo, "meta tampered")
+            assert message in P("merge-check --base main", repo, ok=False).stdout, message
+            sh("git reset -q --hard HEAD~1", repo)
+        assert "✓" in P("merge-check --base main", repo).stdout
 
         # 문서만 바뀌면 개발·QA 승인은 유지, Wiki 승인은 깨진다
         (repo / "README.md").write_text("doc\n")

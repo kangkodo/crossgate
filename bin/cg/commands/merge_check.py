@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import sys
-from cg.core import LABEL, config, git, is_pm, load, match, require_sealed, required_stages, reviews, root
+from cg.core import LABEL, ROUTES, config, git, is_pm, load, match, require_sealed, required_stages, reviews, root
 
 
 def infra_upgrade(base, changed):
@@ -99,8 +99,44 @@ def infra_upgrade(base, changed):
     print(f"✓ 인프라 PR(킷 업그레이드 {old_version} → {new_version})")
 
 
-# 감사 뒤에도 바뀌는 것이 정상인 실행 기록: 판정·호출 원장(덧붙이기), 타임라인(자동 생성), 닫기 기록.
-AUDIT_LEDGER = {"verdicts.jsonl", "timeline.md", "usage.jsonl", "meta.json"}
+# 감사 뒤에도 바뀌는 것이 정상인 실행 기록: 판정·호출 원장(덧붙이기), 타임라인(자동 생성).
+AUDIT_LEDGER = {"verdicts.jsonl", "timeline.md", "usage.jsonl"}
+# meta.json은 닫기 필드만 감사 뒤에 바뀔 수 있다.
+CLOSE_FIELDS = ("closed", "close_note")
+
+
+def meta_at(commit, path):
+    """그 커밋의 meta.json에서 닫기 필드를 뺀 것. 없거나 못 읽으면 None."""
+    text = git("show", f"{commit}:{path}", check=False)
+    try:
+        meta = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return {k: v for k, v in meta.items() if k not in CLOSE_FIELDS} if isinstance(meta, dict) else None
+
+
+def trusted_meta(run_path, meta):
+    """필수 단계를 정하는 route·kit을 실행을 만든 커밋 기준으로 고정한다. (meta, 문제 목록)
+
+    route는 올리기만 되고(route 명령), kit은 바뀌지 않는다. 그래서 작업 중에 meta.json을 고쳐 단계를 줄일 수 없다.
+    ponytail: 실행을 만든 커밋 자체를 다시 쓰는 것(기록 재작성)은 막지 못한다. 필요하면 브랜치 보호로 막는다.
+    """
+    path = f"{run_path}/meta.json"
+    added = git("log", "--diff-filter=A", "--format=%H", "--", path, check=False).split()
+    first = meta_at(added[-1], path) if added else None
+    if first is None:
+        return meta, ["meta.json을 만든 커밋을 찾을 수 없음"]
+    problems = []
+    order = list(ROUTES)
+    rank = lambda m: order.index({"quick": "standard"}.get(m.get("route", "full"), m.get("route", "full")))
+    try:
+        if rank(meta) < rank(first):
+            problems.append(f"등급이 실행을 만든 뒤 낮아짐 ({first.get('route')} → {meta.get('route')})")
+    except ValueError:
+        problems.append(f"알 수 없는 등급: {meta.get('route')}")
+    if meta.get("kit") != first.get("kit"):
+        problems.append("meta.json의 kit이 실행을 만든 뒤 바뀜")
+    return ({**meta, "route": first.get("route", "full"), "kit": first.get("kit")} if problems else meta), problems
 
 
 def cmd_merge_check(a):
@@ -123,8 +159,8 @@ def cmd_merge_check(a):
     run = root() / runs[0]
     recs = load(run)
     meta = json.loads((run / "meta.json").read_text(encoding="utf-8"))
+    meta, problems = trusted_meta(runs[0], meta)
     stages = required_stages(cfg, meta)
-    problems = []
     opened = [folder.name for folder, info in discussions(run) if info["status"] == "open"]
     if opened:
         problems.append("열린 토의: " + ", ".join(opened))
@@ -146,7 +182,9 @@ def cmd_merge_check(a):
             skip = ["ai-log/*"] + (cfg.get("doc_paths", []) if st in ("dev", "qa") else [])
             moved = [f for f in git("diff", "--name-only", rv[-1]["commit"], "HEAD").splitlines()
                      if not match(f, skip) or (st == "audit" and f.startswith(runs[0] + "/")
-                                               and f[len(runs[0]) + 1:] not in AUDIT_LEDGER)]
+                                               and f[len(runs[0]) + 1:] not in AUDIT_LEDGER
+                                               and not (f == runs[0] + "/meta.json"
+                                                        and meta_at(rv[-1]["commit"], f) == meta_at("HEAD", f)))]
             if moved:
                 problems.append(f"{st} 승인 뒤 바뀐 파일: " + ", ".join(moved[:10]))
     if problems:

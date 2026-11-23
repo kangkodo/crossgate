@@ -292,3 +292,20 @@ def test_probe_runs_exactly_the_checked_arguments():
         rec = probes(run)[-1]
         assert "ARGS=2:*:{a,b}" in (repo / rec["log"]).read_text(), "셸 확장 없이 검증한 인자 그대로 돈다"
         assert rec["cmd"] == "sh args.sh '*' '{a,b}'"
+
+
+def test_probe_refuses_without_sandbox_unless_turned_off():
+    """샌드박스가 없는 컴퓨터에서 기본 설정(auto)은 재현을 돌리지 않는다. probe.sandbox: false 로 명시해야 돈다."""
+    import sys
+    from unittest.mock import patch
+    from helpers import KIT
+    sys.path.insert(0, str(KIT / "bin"))
+    from cg.commands import probe
+    with patch.object(probe.shutil, "which", return_value=None):
+        for mode in ("auto", True):
+            try:
+                probe.sandbox({"probe": {"sandbox": mode}}, Path("/x"), Path("/y"))
+                raise AssertionError(f"{mode}: 거부해야 한다")
+            except SystemExit as e:
+                assert e.code == 2
+        assert probe.sandbox({"probe": {"sandbox": False}}, Path("/x"), Path("/y")) == (None, "none")
