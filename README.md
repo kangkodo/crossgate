@@ -147,3 +147,7 @@ The tests run in temporary repositories and never touch a real project.
 ## Credits
 
 Several methods were adapted from pstack (MIT). The [changelog](CHANGELOG.md) says which.
+
+## License
+
+[MIT](LICENSE)
