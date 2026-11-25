@@ -48,6 +48,7 @@ def cli(repo, engine, role='dev-reviewer', *extra):
                        env={**os.environ, 'PATH': str(repo / 'fakebin') + ':' + os.environ['PATH']},
                        capture_output=True, text=True, timeout=10)
     assert p.returncode == 0, p.stderr
+    return p
 
 
 def logs(repo, run):
@@ -116,7 +117,8 @@ def test_review_session_scope_and_legacy_records():
                 cli(repo, engine, role, '--repo', '나')
             calls, ends = logs(repo, run)
             assert all(not x['resumed'] for x in ends)
-            legacy = {'engine': engine, 'role': 'dev-reviewer', 'repo': '가', 'state': 'ok', 'session': 'legacy'}
+            kit = (repo / '.crossgate/kit/VERSION').read_text().strip()
+            legacy = {'engine': engine, 'role': 'dev-reviewer', 'repo': '가', 'state': 'ok', 'session': 'legacy', 'kit': kit}
             with usage.open('a') as f:
                 for row in [legacy, {**legacy, 'event': 'start', 'session': 'unfinished'},
                             {**legacy, 'state': 'failed', 'session': 'failed'}, {**legacy, 'session': None}]:
@@ -124,6 +126,14 @@ def test_review_session_scope_and_legacy_records():
             cli(repo, engine, 'dev-reviewer', '--repo', '가')
             calls, ends = logs(repo, run)
             assert ends[-1]['resumed'] and 'legacy' in calls[-1]['args']
+            # 다른 킷 버전에서 시작한 세션(버전 기록이 없는 옛 줄 포함)은 새 응답 형식을 모르므로 잇지 않는다
+            for old in ({**legacy, 'kit': '0.0.1', 'session': 'old-kit'}, {k: v for k, v in legacy.items() if k != 'kit'}):
+                with usage.open('a') as f:
+                    f.write(json.dumps(old) + '\n')
+                p = cli(repo, engine, 'dev-reviewer', '--repo', '가')
+                calls, ends = logs(repo, run)
+                assert not ends[-1]['resumed'] and ends[-1]['kit'] == kit and '다른 킷 버전' in p.stderr
+                assert calls[-1]['prompt'] != '이번 검수 지시', '새 세션에는 역할 카드와 규칙을 다시 넣는다'
             other = repo / P('init-run 다음', repo).stdout.strip()
             cli(repo, engine, 'dev-reviewer', '--repo', '가', '--run', str(other))
             assert not logs(repo, other)[1][-1]['resumed']

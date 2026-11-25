@@ -5,6 +5,16 @@ from cg.core import LABEL, REVIEW, STAGES, VERDICTS, at, attempt_number, config,
 
 
 def cmd_verdict(a):
+    # 원장은 고쳐 쓰지 않으므로 잘못된 값은 쓰기 전에 막는다.
+    allowed = ("PASSED", "FAILED") if a.stage == "qa" else ("APPROVED", "REJECTED")
+    if a.verdict in ("APPROVED", "REJECTED", "PASSED", "FAILED") and a.verdict not in allowed:
+        sys.exit(f"{a.stage} 단계의 판정은 {' / '.join(allowed)} 입니다({a.verdict} 불가).")
+    issues = {}
+    for kv in filter(None, (x.strip() for x in (a.issues or "").split(","))):
+        key, sep, state = kv.partition("=")
+        if not sep or not key or state not in ("open", "resolved"):
+            sys.exit(f"--issues 형식 오류: {kv!r}. <ID>=open 또는 <ID>=resolved 를 쉼표로 잇는다(예: D-1=open,D-2=resolved).")
+        issues[key] = state
     cfg, run = config(), current_run(a.run, writing=True)
     recs = load(run)
     repo = repo_dir(cfg, a.repo)
@@ -18,7 +28,6 @@ def cmd_verdict(a):
         if dirty:
             sys.exit("커밋되지 않은 변경이 있습니다. 승인은 커밋된 상태에만 기록합니다.\n" + "\n".join(dirty[:10]))
     attempt = a.attempt or attempt_number(recs, a.stage, a.verdict, a.repo)
-    issues = dict(kv.split("=", 1) for kv in a.issues.split(",")) if a.issues else {}
     commit = git("rev-parse", "HEAD", cwd=repo) if versioned else None
     contrast = sorted(set(a.contrast or []))
     proofs = {}
@@ -54,7 +63,8 @@ def cmd_verdict(a):
     write_timeline(run)
     print(f"기록: {a.stage} #{attempt} {LABEL[a.verdict]} @ {at(rec)} → {run.name}")
     recs = load(run)
-    esc = escalation(recs, a.stage, config_value(cfg, "cap", 3), a.repo)
+    # 조정 안내는 반려를 기록한 때만 낸다(ESCALATED·READY를 기록한 직후에 같은 안내를 되풀이하지 않는다).
+    esc = a.verdict in ("REJECTED", "FAILED") and escalation(recs, a.stage, config_value(cfg, "cap", 3), a.repo)
     if esc:
         print(f"조정 필요: {esc}. ESCALATED를 기록하고 사용자에게 묻습니다.")
         return
@@ -70,7 +80,7 @@ def register(subparsers):
     p.add_argument("--stage", required=True, choices=STAGES)
     p.add_argument("--verdict", required=True, choices=VERDICTS)
     p.add_argument("--attempt", type=int); p.add_argument("--actor"); p.add_argument("--model")
-    p.add_argument("--issues", help="P-1=open,P-2=resolved"); p.add_argument("--unverified", nargs="*")
+    p.add_argument("--issues", help="<ID>=open|resolved 를 쉼표로: P-1=open,P-2=resolved"); p.add_argument("--unverified", nargs="*")
     p.add_argument("--evidence", nargs="*"); p.add_argument("--tokens", type=int); p.add_argument("--note")
     p.add_argument("--contrast", nargs="*", metavar="<ID>", help="실행이 아니라 위치·문서로 증명하는 대조 지적(R15)")
     p.add_argument("--run"); p.add_argument("--repo"); p.set_defaults(fn=cmd_verdict)

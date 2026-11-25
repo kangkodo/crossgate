@@ -7,7 +7,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from cg.calls import invoke
-from cg.core import config, current_run, git, is_pm, repo_dir, require_sealed, root
+from cg.core import config, current_run, git, is_pm, repo_dir, require_sealed, root, setup_command
 from cg.gatelib import protected_changes, run_gates
 
 
@@ -154,8 +154,9 @@ def cmd_parallel(a):
                 worktrees.mkdir(parents=True, exist_ok=True)
                 git_result(task['target'], 'worktree', 'add', '-b', task['branch'],
                            str(task['workdir']), bases[task['target']])
-                if options.get('setup'):
-                    result = subprocess.run(options['setup'], shell=True, cwd=task['workdir'])
+                setup = setup_command(cfg, task['repo'])[0]
+                if setup:
+                    result = subprocess.run(setup, shell=True, cwd=task['workdir'])
                     if result.returncode:
                         task['state'], task['note'] = 'failed', '워크트리 준비 명령 실패'
             except (OSError, RuntimeError) as exc:

@@ -12,8 +12,9 @@ def test_core_seams():
         root = Path(d).resolve()
         (root / '.crossgate').mkdir()
         (root / '.crossgate/current-run').write_text('current')
-        (root / 'current').mkdir()
-        (root / 'current/meta.json').write_text(json.dumps({'route': 'full'}))
+        for name in ('current', 'environment', 'absolute', 'explicit'):
+            (root / name).mkdir()
+            (root / name / 'meta.json').write_text(json.dumps({'route': 'full'}))
         with patch.object(core, 'root', return_value=root), patch.object(core, 'config', return_value={}), patch.dict(os.environ, {}, clear=True):
             assert core.current_run(writing=True) == root / 'current'
             os.environ['CROSSGATE_RUN'] = 'environment'

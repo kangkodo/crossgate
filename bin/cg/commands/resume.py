@@ -6,7 +6,7 @@ import math
 import os
 import subprocess
 import time
-from cg.core import config, config_value, current_run, is_pm, load, open_ids, recent_activity, required_stages, reviews, root, run_state
+from cg.core import config, config_value, current_run, escalation, is_pm, load, open_ids, read_jsonl, recent_activity, required_stages, reviews, root, run_state
 
 
 def stage_rows(cfg, meta, recs):
@@ -19,7 +19,7 @@ def stage_rows(cfg, meta, recs):
             last = records[-1] if records else None
             review = rv[-1] if rv else None
             label = f'{stage} [{repo}]' if repo else stage
-            yield stage, label, last, review
+            yield stage, label, last, review, repo
 
 
 def next_action(rows, recs, cfg):
@@ -29,7 +29,7 @@ def next_action(rows, recs, cfg):
         return '사용자 조정 대기'
     if not any(r['stage'] == 'request' and r['verdict'] == 'APPROVED' and r.get('actor') == 'user' for r in recs):
         return '요청 정리(결정 목록, 요청 검수, 한 번에 질문)'
-    for stage, label, last, review in rows:
+    for stage, label, last, review, _ in rows:
         if review is None:
             return f'{label}: 그 단계 시작 또는 검수 요청'
         verdict = review['verdict']
@@ -44,10 +44,7 @@ def next_action(rows, recs, cfg):
 
 
 def interrupted_calls(run, cfg):
-    path = run / 'usage.jsonl'
-    if not path.exists():
-        return []
-    records = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+    records = read_jsonl(run / 'usage.jsonl')
     ended = {r.get('id') for r in records if r.get('event', 'end') == 'end'}
     minutes = config_value(cfg, 'timeouts.call_minutes', {})
     now = time.time()
@@ -127,11 +124,12 @@ def cmd_resume(a):
     rows = list(stage_rows(cfg, meta, recs))
     cap = config_value(cfg, 'cap', 3)
     print('단계 | 최신 판정 | 회차/상한 | 미해결 지적')
-    for stage, label, last, review in rows:
+    for stage, label, last, review, repo in rows:
         verdict = last['verdict'] if last else '없음'
         attempt = last.get('attempt', 0) if last else 0
         opened = ', '.join(sorted(open_ids(review))) if review else ''
-        print(f'{label} | {verdict} | {attempt}/{cap} | {opened or "없음"}')
+        esc = escalation(recs, stage, cap, repo)
+        print(f'{label} | {verdict} | {attempt}/{cap} | {opened or "없음"}' + (f' | ⚠ {esc}' if esc else ''))
     calls = interrupted_calls(run, cfg)
     print('중단된 호출:' + ('' if calls else ' 없음'))
     for call in calls:

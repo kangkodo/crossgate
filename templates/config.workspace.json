@@ -22,7 +22,8 @@
   "repos": {
     "backend": {
       "gate": [{ "name": "test", "run": "npm test" }],
-      "protected": ["tests/acceptance/*"]
+      "protected": ["tests/acceptance/*"],
+      "probe": {}
     }
   },
   "probe": { "commands": [], "sandbox": "auto", "network": false, "env": [], "read_allow": [], "write_allow": [] },

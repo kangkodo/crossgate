@@ -4,14 +4,15 @@
 """
 import datetime as dt
 import json
-from cg.core import REVIEW, STAGES, config, load, open_ids, read_jsonl, read_usage, root, run_state
+from cg.core import REVIEW, STAGES, config, config_value, load, open_ids, read_jsonl, read_usage, root, run_state
 
 
 def collect(days):
     cfg, r = config(), root()
+    cap = config_value(cfg, "cap", 3)
     since = (dt.date.today() - dt.timedelta(days=days)).strftime("%Y%m%d")
     runs = sorted(p.parent for p in (r / "ai-log").glob("*/*/meta.json") if p.parent.parent.name >= since)
-    out = {"days": days, "runs": len(runs), "routes": {}, "states": {}, "stages": {}, "repeated": [],
+    out = {"days": days, "runs": len(runs), "routes": {}, "states": {}, "stages": {}, "repeated": [], "over_cap": [],
            "dev_findings": {"blocking": 0, "proven": 0, "contrast": 0},
            "probes": {"total": 0, "reproduced": 0, "not_reproduced": 0, "error": 0}, "usage": {}}
     for run in runs:
@@ -32,7 +33,11 @@ def collect(days):
                 s["blocked"] += len(rv) - len(judged)
                 s["rejected"] += sum(x["verdict"] in ("REJECTED", "FAILED") for x in judged)
                 s["first_pass"] += bool(judged) and judged[0]["verdict"] in ("APPROVED", "PASSED")
-                s["escalated"] += sum(x["stage"] == st and x.get("repo") == repo and x["verdict"] == "ESCALATED" for x in recs)
+                escalated = sum(x["stage"] == st and x.get("repo") == repo and x["verdict"] == "ESCALATED" for x in recs)
+                s["escalated"] += escalated
+                if len(judged) > cap:
+                    out["over_cap"].append(f"{run.name} {st}{' [' + repo + ']' if repo else ''} {len(judged)}/{cap}"
+                                           + ("" if escalated else " (조정 요청 기록 없음)"))
                 for a, b in zip(judged, judged[1:]):
                     for fid in sorted(open_ids(a) & open_ids(b)):
                         out["repeated"].append(f"{run.name} {st} {fid}")
@@ -82,6 +87,7 @@ def cmd_retro(a):
     p = d["probes"]
     print(f"재현 시도 {p['total']}회: 재현 {p['reproduced']} · 재현 안 됨 {p['not_reproduced']} · 환경 실패 {p['error']}")
     print(f"두 회차 연속 남은 지적 {len(d['repeated'])}건" + (": " + "; ".join(d["repeated"][:10]) if d["repeated"] else ""))
+    print(f"검수 상한을 넘긴 묶음 {len(d['over_cap'])}건" + (": " + "; ".join(d["over_cap"][:10]) if d["over_cap"] else ""))
     print("호출: 횟수 · 분 · 입력/출력 토큰 · 비용(Claude만 기록)")
     for k, g in sorted(d["usage"].items()):
         cost = f" · ${g['cost_usd']:.2f}" if g["cost_usd"] else ""

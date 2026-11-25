@@ -10,7 +10,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from cg.core import READ_ONLY_ROLES, WRITE_ROLES, config, current_run, git, is_pm, mask, read_usage, repo_dir, request_approved, root, route_conf
+from cg.core import READ_ONLY_ROLES, WRITE_ROLES, config, current_run, git, is_pm, kit_version, mask, read_usage, repo_dir, request_approved, root, route_conf
 from cg.prompt import build_prompt
 
 
@@ -176,13 +176,20 @@ def invoke(engine, role, task, *, run=None, repo=None, workdir=None, effort=None
         prompt += "\n\n" + fresh_guidance
     resume_prompt = task + ("\n\n" + extra_guidance if extra_guidance else "")
     resume_session = None
+    kit = kit_version()
     if role in READ_ONLY_ROLES and not fresh and (session_key or cfg.get("resume_reviews", True)) \
             and (session_key or not (engine == "codex" and c.get("ephemeral"))):
-        resume_session = next((rec["session"] for rec in reversed(read_usage(run))
-                               if rec.get("engine") == engine and rec.get("role") == role
-                               and rec.get("session_key") == session_key
-                               and rec.get("repo") == repo and rec.get("state") == "ok"
-                               and rec.get("session")), None)
+        prior = next((rec for rec in reversed(read_usage(run))
+                      if rec.get("engine") == engine and rec.get("role") == role
+                      and rec.get("session_key") == session_key
+                      and rec.get("repo") == repo and rec.get("state") == "ok"
+                      and rec.get("session")), None)
+        if prior and prior.get("kit") != kit:
+            # 이어 쓸 때는 이번 지시만 보내므로, 옛 킷에서 시작한 세션은 새 규칙·응답 형식을 모른다.
+            print(f"알림: 이전 {role} 세션은 다른 킷 버전({prior.get('kit') or '기록 없음'})에서 시작했습니다. "
+                  f"새 세션으로 부릅니다(지금 {kit}).", file=sys.stderr)
+        elif prior:
+            resume_session = prior["session"]
     limits = cfg.get("timeouts", {})
     minutes = limits.get("call_minutes", {})
     seconds = float(minutes.get(role, minutes.get("default", 40 if role in WRITE_ROLES else 20))) * 60
@@ -216,7 +223,7 @@ def invoke(engine, role, task, *, run=None, repo=None, workdir=None, effort=None
             if effort:
                 cmd += ["--effort", effort]
         common = {"id": call_id, "engine": engine, "role": role, "model": model,
-                  "effort": effort, "effort_source": source, "repo": repo}
+                  "effort": effort, "effort_source": source, "repo": repo, "kit": kit}
         if session_key is not None:
             common.update(session_key=session_key, discussion=discussion, participant=participant, round=round_number)
         append_usage(run, {**common, "event": "start", "ts": dt.datetime.now().isoformat(timespec="seconds")})

@@ -76,7 +76,7 @@ def test_infra_pr_conditions():
                 path.write_text(path.read_text().replace('# source: v9.9.9', '# source: dev'))
                 reason = '조건 6'
             elif case in ('동일 버전', '낮은 버전'):
-                sh(f'sh {kit}/install.sh --ref v9.9.8 .', repo)
+                sh(f'sh {kit}/install.sh --downgrade --ref v9.9.8 .', repo)
                 path = repo / '.claude/skills/crossgate/SKILL.md'
                 path.write_text(path.read_text() + '\n추가 안내\n')
                 if case == '낮은 버전':
@@ -89,12 +89,12 @@ def test_infra_pr_conditions():
                     sh('git checkout upgrade', repo)
                     # 공통 조상 자체를 높은 버전으로 만든 별도 기준을 사용한다.
                     sh('git merge -q --ff-only main', repo)
-                    sh(f'sh {kit}/install.sh --ref v9.9.9 .', repo)
+                    sh(f'sh {kit}/install.sh --downgrade --ref v9.9.9 .', repo)
                 reason = '조건 7'
             elif case == '처음 설치':
                 reason = '처음 설치'
             elif case == '일반 변경':
-                sh(f'sh {kit}/install.sh --ref v9.9.8 .', repo)
+                sh(f'sh {kit}/install.sh --downgrade --ref v9.9.8 .', repo)
                 (repo / 'app.txt').write_text('일반 변경\n')
                 reason = '실행 기록이 0개'
             else:

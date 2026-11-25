@@ -25,14 +25,16 @@ WRITE_ROLES = {"developer", "qa"}
 # ponytail: 정규식 마스킹이라 형식이 특이한 비밀은 놓칠 수 있다. 누락이 나오면 패턴을 늘리거나 gitleaks로 바꾼다.
 SECRET = re.compile(
     r"(?i)((?:api[_-]?key|token|secret|password|passwd|authorization)[\"']?\s*[:=]\s*[\"']?(?:bearer\s+)?)([^\s\"',]{6,})"
-    r"|\b(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})")
+    r"|\b(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,})"
+    # 주소 속 비밀번호: scheme://user:pass@host
+    r"|(\b[a-z][a-z0-9+.-]*://[^\s/:@\"']*:)[^\s/@\"']+(?=@)")
 MANIFEST = "MANIFEST.sha256"
 SKIP = {MANIFEST, ".DS_Store"}
 RECENT_MIN = 60
 
 
 def mask(text):
-    return SECRET.sub(lambda m: m.group(1) + "***" if m.group(1) else "***", text)
+    return SECRET.sub(lambda m: (m.group(1) or m.group(4) or "") + "***", text)
 
 
 def git(*args, check=True, strip=True, cwd=None):
@@ -41,6 +43,11 @@ def git(*args, check=True, strip=True, cwd=None):
     if check and r.returncode:
         sys.exit(f"git {' '.join(args)} 실패: {r.stderr.strip()}")
     return r.stdout.strip() if strip else r.stdout
+
+
+def kit_version():
+    f = KIT / "VERSION"
+    return f.read_text().strip() if f.exists() else "?"
 
 
 def root():
@@ -91,8 +98,11 @@ def config():
     p = root() / ".crossgate" / "config.json"
     if not p.exists():
         sys.exit(".crossgate/config.json 이 없습니다. 킷의 install.sh 로 설치하세요.")
-    cfg = json.loads(p.read_text(encoding="utf-8"))
-    kv = (KIT / "VERSION").read_text().strip() if (KIT / "VERSION").exists() else "?"
+    try:
+        cfg = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError as e:
+        sys.exit(f".crossgate/config.json 을 읽을 수 없습니다(JSON 문법): {e}")
+    kv = kit_version()
     if cfg.get("kit_version") != kv:
         print(f"경고: config kit_version={cfg.get('kit_version')} / 설치된 킷 {kv}", file=sys.stderr)
     return cfg
@@ -139,6 +149,21 @@ def repo_dir(cfg, name):
     return d
 
 
+def probe_conf(cfg, repo=None):
+    """재현 설정. repos.<이름>.probe에 적은 키는 전역 probe의 같은 키를 통째로 대신한다(목록도 합치지 않는다)."""
+    own = cfg.get("repos", {}).get(repo, {}).get("probe") if repo else None
+    return {**(cfg.get("probe") or {}), **(own or {})}
+
+
+def setup_command(cfg, repo=None):
+    """(워크트리·재현 복사본의 준비 명령 또는 None, 설정 이름). repos.<이름>.setup을 적었으면 그것(빈 값은 준비 없음),
+    없으면 parallel.setup."""
+    rc = cfg.get("repos", {}).get(repo, {}) if repo else {}
+    if "setup" in rc:
+        return rc["setup"] or None, f"repos.{repo}.setup"
+    return config_value(cfg, "parallel.setup", None), "parallel.setup"
+
+
 def recent_activity(run, cfg):
     """실행 기록 세 파일 중 하나가 최근에 바뀌었는지."""
     cutoff = time.time() - cfg.get("recent_minutes", RECENT_MIN) * 60
@@ -163,6 +188,24 @@ def run_state(run, cfg):
     return "끝남"
 
 
+def find_run(value):
+    """--run·CROSSGATE_RUN 값을 실행 폴더로 푼다: 경로(현재 폴더 → 설치 위치 기준) 또는 실행 폴더 이름.
+
+    명령이 출력하는 것이 폴더 이름이라(resume --list, 여러 실행 경고) 이름만으로도 받는다.
+    """
+    r = root()
+    found = [p for p in (Path(value), r / value) if (p / "meta.json").exists()][:1]
+    if not found and "/" not in value.strip("/"):
+        found = sorted(p.parent for p in (r / "ai-log").glob(f"*/{value.strip('/')}/meta.json"))
+    if len(found) > 1:
+        sys.exit(f"이름이 {value} 인 실행이 여럿입니다. 경로로 지정하세요: "
+                 + ", ".join(str(p.relative_to(r)) for p in found))
+    if not found:
+        sys.exit(f"실행 기록 폴더를 찾을 수 없습니다: {value} (meta.json 없음). "
+                 "경로는 현재 폴더나 설치 위치 기준이고, 실행 폴더 이름만 써도 됩니다. crossgate resume --list 로 확인하세요.")
+    return found[0].resolve()
+
+
 def current_run(arg=None, writing=False, *, allow_closed=False):
     """명시 인자 → 환경 변수 → 현재 실행. 묶기 검사는 이 함수에서만 한다.
 
@@ -170,15 +213,16 @@ def current_run(arg=None, writing=False, *, allow_closed=False):
     """
     env = os.environ.get("CROSSGATE_RUN")
     implicit = not arg and not env
-    if arg:
-        run = Path(arg).resolve()
-    elif env:
-        run = (root() / env).resolve()
-    else:
+    if implicit:
         p = root() / ".crossgate" / "current-run"
         if not p.exists():
             sys.exit("현재 실행이 없습니다. crossgate init-run 을 먼저 실행하세요.")
         run = root() / p.read_text().strip()
+        if not (run / "meta.json").exists():
+            sys.exit(f"current-run 이 가리키는 실행 기록이 없습니다: {p.read_text().strip()}. "
+                     "--run 으로 실행을 지정하거나 init-run 으로 새로 만드세요.")
+    else:
+        run = find_run(arg or env)
     cfg = config()
     if writing and not allow_closed and run_state(run, cfg) == "닫힘":
         message = "닫힌 실행에는 쓸 수 없습니다. close-run --reopen 으로 다시 여세요."
@@ -199,7 +243,16 @@ def current_run(arg=None, writing=False, *, allow_closed=False):
 def read_jsonl(path):
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = []
+    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if line.strip():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                # 원장이라 깨진 줄을 조용히 건너뛰지 않는다(병합 충돌 표시, 끊긴 쓰기).
+                sys.exit(f"{path}:{n} 줄을 읽을 수 없습니다(JSON 아님). 병합 충돌 표시나 끊긴 줄이면 "
+                         "그 줄만 바로잡은 뒤 다시 실행하세요.")
+    return rows
 
 
 def load(run):
@@ -231,14 +284,15 @@ def escalation(recs, stage, cap, repo=None):
     rv = [x for x in reviews(recs, stage, repo) if x["verdict"] != "BLOCKED"]
     if not rv or rv[-1]["verdict"] in ("APPROVED", "PASSED"):
         return None
+    reasons = []
     last = rv[-3:]
     if len(last) == 3:
         stuck = set.intersection(*(open_ids(x) for x in last))
         if stuck:
-            return f"지적 {', '.join(sorted(stuck))}이(가) 두 번 수정한 뒤에도 남음"
+            reasons.append(f"지적 {', '.join(sorted(stuck))}이(가) 두 번 수정한 뒤에도 남음")
     if len(rv) >= cap:
-        return f"검수 {len(rv)}회로 상한({cap}회) 도달"
-    return None
+        reasons.append(f"검수 {len(rv)}회로 상한({cap}회) " + ("도달" if len(rv) == cap else f"{len(rv) - cap}회 초과"))
+    return " · ".join(reasons) or None
 
 
 def at(x):
@@ -270,8 +324,4 @@ def config_value(cfg, key, default):
 
 def read_usage(run):
     """끝난 호출만 읽는다. event가 없는 옛 기록도 끝 기록이다."""
-    path = run / "usage.jsonl"
-    if not path.exists():
-        return []
-    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return [record for record in records if record.get("event", "end") == "end"]
+    return [record for record in read_jsonl(run / "usage.jsonl") if record.get("event", "end") == "end"]

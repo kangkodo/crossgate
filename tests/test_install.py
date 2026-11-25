@@ -23,12 +23,38 @@ def test_seal_and_tag_install():
         # 태그에서 설치하면 그 태그의 내용과 출처가 봉인된다(작업 트리를 임시 저장소에 커밋·태그해 시험)
         kit = Path(d) / "kitcopy"
         shutil.copytree(KIT, kit, ignore=shutil.ignore_patterns(".git"))
+        (kit / "VERSION").write_text("9.9.9\n")
         sh("git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm k && git tag v9.9.9", kit)
         (kit / "VERSION").write_text("dirty-not-installed\n")  # 작업 중 변경은 태그 설치에 섞이면 안 된다
         sh(f"sh {kit}/install.sh --ref v9.9.9 .", repo)
-        assert (repo / ".crossgate/kit/VERSION").read_text().strip() == (KIT / "VERSION").read_text().strip()
+        assert (repo / ".crossgate/kit/VERSION").read_text().strip() == "9.9.9"
         assert "# source: v9.9.9" in (repo / ".crossgate/kit/MANIFEST.sha256").read_text()
         assert not (repo / ".crossgate/kit/roles/extra.md").exists()
+        # 태그 이름과 그 태그의 VERSION이 어긋난 릴리스는 설치하지 않는다
+        sh("git checkout -q -- VERSION && git tag v9.9.10", kit)
+        out = sh(f"sh {kit}/install.sh --ref v9.9.10 .", repo, ok=False)
+        assert out.returncode and "어긋난" in out.stderr, out.stderr
+        # 설치된 것보다 낮은 버전은 밝혀야 깔린다(태그를 받아오지 않은 원본에서 올리다 옛 버전이 깔리지 않게)
+        out = sh(f"sh {KIT}/install.sh --dev .", repo, ok=False)
+        assert out.returncode and "낮은 버전" in out.stderr and "fetch --tags" in out.stderr, out.stderr
+        assert (repo / ".crossgate/kit/VERSION").read_text().strip() == "9.9.9", "거부한 설치는 킷을 건드리지 않는다"
+        assert "봉인 유지" in P("verify", repo).stdout
+        sh(f"sh {KIT}/install.sh --dev --downgrade .", repo)
+        assert (repo / ".crossgate/kit/VERSION").read_text().strip() == (KIT / "VERSION").read_text().strip()
+
+
+def test_release_tag_changelog_and_version_agree():
+    """원본의 최신 태그는 그 태그의 VERSION과 같고, 작업 중 VERSION은 그보다 낮지 않으며 변경 이력 맨 위와 같다."""
+    version = (KIT / "VERSION").read_text().strip()
+    top = next(line for line in (KIT / "CHANGELOG.md").read_text(encoding="utf-8").splitlines() if line.startswith("## "))
+    assert top.split()[1] == version, f"CHANGELOG 맨 위({top})와 VERSION({version})이 다르다"
+    tags = sh("git tag --sort=-v:refname", KIT, ok=False).stdout.split() if (KIT / ".git").exists() else []
+    if not tags:
+        return  # 태그 없는 복사본(압축본, 얕은 clone)
+    latest = tags[0]
+    assert sh(f"git show {latest}:VERSION", KIT).stdout.strip() == latest.lstrip("v"), f"{latest} 의 VERSION이 태그와 다르다"
+    number = lambda v: tuple(map(int, v.split(".")))
+    assert number(version) >= number(latest.lstrip("v")), f"VERSION {version} 이 최신 태그 {latest} 보다 낮다"
 
 
 def test_migrate_from_0_1():

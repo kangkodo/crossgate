@@ -17,7 +17,7 @@ import sys
 import tempfile
 import uuid
 from pathlib import Path
-from cg.core import config, config_value, current_run, is_pm, mask, repo_dir, root
+from cg.core import config, config_value, current_run, is_pm, mask, probe_conf, repo_dir, root, setup_command
 
 # 검수자가 붙이는 인자에 셸 연결·치환이 들어가면 허용 목록이 무의미해진다.
 UNSAFE = re.compile(r"[;&|<>$`\\\n()]")
@@ -189,7 +189,7 @@ def shell(cmd, cwd, seconds, prefix=None, env=None):
     return code, out or ""
 
 
-def attempt(target, commit, patch, cmd, cfg, seconds):
+def attempt(target, commit, patch, cmd, cfg, seconds, setup=(None, None)):
     """(상태, 종료 코드, 출력, 샌드박스). 상태: ran | copy-failed | setup-failed | patch-failed | timeout.
 
     복사본은 객체만 빌려 쓰는 공유 clone이다(본 저장소의 config·hooks·워크트리 목록을 건드리지 않는다).
@@ -206,11 +206,10 @@ def attempt(target, commit, patch, cmd, cfg, seconds):
         if r.returncode:
             return "copy-failed", r.returncode, r.stdout + r.stderr, None
         # 준비 명령은 설정(보호 경로)이 정한 것이고 패치 전에 돈다. gate와 같은 신뢰 수준이라 가두지 않는다.
-        setup = config_value(cfg, "parallel.setup", None)
-        if setup:
-            code, out = shell(setup, tree, seconds)
+        if setup[0]:
+            code, out = shell(setup[0], tree, seconds)
             if code is None:
-                return "timeout", None, "준비 명령(parallel.setup) 시간 초과\n" + out, None
+                return "timeout", None, f"준비 명령({setup[1]}) 시간 초과\n" + out, None
             if code:
                 return "setup-failed", code, out, None
         if patch:
@@ -248,6 +247,9 @@ def cmd_probe(a):
         refuse("PM 모드의 probe 는 --repo 가 필요합니다.")
     target = repo or r
     rc = cfg["repos"][a.repo] if repo else cfg
+    # 저장소별 재현 설정(repos.<이름>.probe)을 전역 probe 위에 키 단위로 덮는다. 아래는 모두 이 값을 읽는다.
+    cfg = {**cfg, "probe": probe_conf(cfg, a.repo)}
+    setup = setup_command(cfg, a.repo)
     prefixes = config_value(cfg, "probe.commands", None) or [g["run"] for g in rc.get("gate", [])]
     run_cmd = allowed(prefixes, a.cmd)
     if not run_cmd:
@@ -259,10 +261,10 @@ def cmd_probe(a):
     commit = resolve(target, a.commit or "HEAD")
     baseline = resolve(target, a.baseline) if a.baseline else None
     seconds = float(config_value(cfg, "timeouts.call_minutes.probe", 10)) * 60
-    head = attempt(target, commit, patch, run_cmd, cfg, seconds)
+    head = attempt(target, commit, patch, run_cmd, cfg, seconds, setup)
     base = None
     if baseline:
-        base = attempt(target, baseline, patch, run_cmd, cfg, seconds)
+        base = attempt(target, baseline, patch, run_cmd, cfg, seconds, setup)
     failed_here = head[0] == "ran" and head[1] != 0 and a.expect in head[2]
     clean_before = base is None or (base[0] == "ran" and base[1] == 0)
     if head[0] != "ran" or (base and base[0] != "ran"):
@@ -292,7 +294,9 @@ def cmd_probe(a):
     if state == "not-reproduced" and head[1] != 0 and a.expect not in head[2]:
         print("  실패는 했지만 출력에 실패 표시가 없습니다. 다른 이유의 실패일 수 있습니다(패치·명령 오류)."
               + ("" if head[3] in (None, "none") or "network" in head[3] else
-                 " 샌드박스가 네트워크를 막았을 수 있습니다(로컬 DB·서버가 필요하면 probe.network)."))
+                 " 샌드박스가 네트워크를 막았을 수 있습니다(로컬 DB·서버가 필요하면 probe.network).")
+              + ("" if setup[0] else " 복사본은 새 clone이라 의존성(node_modules 등)이 없습니다. 필요하면 준비 명령"
+                 "(parallel.setup, PM 모드는 repos.<이름>.setup)을 설정하세요(CROSSGATE.md 17장)."))
     elif state == "not-reproduced" and failed_here and not clean_before:
         print("  기준선에서도 실패합니다. 이번 변경이 만든 회귀가 아닙니다.")
     sys.exit({"reproduced": 0, "not-reproduced": 1, "error": 3}[state])

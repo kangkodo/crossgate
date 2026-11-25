@@ -1,15 +1,18 @@
 #!/bin/sh
-# 사용법: install.sh [--ref 태그 | --dev] <프로젝트 경로>
+# 사용법: install.sh [--ref 태그 | --dev] [--downgrade] <프로젝트 경로>
 #         install.sh --workspace <작업공간 경로>   (git이 아닌 루트 + 저장소 여러 개, PM 모드)
 #         install.sh --global   (전역 스킬 /crossgate-setup 을 ~/.claude/skills 에 설치)
 # 킷을 프로젝트의 .crossgate/kit/ 에 설치하거나 업그레이드한다.
 # 기본은 최신 태그에서 설치한다(원본의 작업 중 변경이 섞이지 않게). --dev 는 작업 트리를 그대로 설치한다(시험용).
+# v로 시작하는 태그는 그 태그의 VERSION 파일과 같아야 하고, 설치된 것보다 낮은 버전은 --downgrade 없이는 깔지 않는다
+# (태그를 받아오지 않은 오래된 원본에서 올리다가 조용히 옛 버전이 깔리지 않게).
 # 설치 뒤 MANIFEST.sha256 으로 복사본을 봉인한다. 프로젝트 설정(.crossgate/config.json)은 없을 때만 만든다.
 set -eu
 KIT=$(cd "$(dirname "$0")" && pwd)
 REF=""
 DEV=0
 WS=0
+DOWN=0
 if [ "${1:-}" = "--global" ]; then
   G="$HOME/.claude/skills/crossgate-setup"
   mkdir -p "$G"
@@ -22,6 +25,7 @@ while [ $# -gt 1 ]; do
     --ref) REF=$2; shift 2 ;;
     --dev) DEV=1; shift ;;
     --workspace) WS=1; shift ;;
+    --downgrade) DOWN=1; shift ;;
     *) echo "알 수 없는 옵션: $1" >&2; exit 2 ;;
   esac
 done
@@ -39,6 +43,20 @@ else
   SOURCE="$REF ($(git -C "$KIT" rev-parse --short "$REF^{commit}"))"
 fi
 VERSION=$(cat "$SRC/VERSION")
+case "$REF" in
+  v[0-9]*) [ "v$VERSION" = "$REF" ] || { echo "태그 $REF 의 VERSION 파일은 $VERSION 입니다. 태그와 VERSION이 어긋난 릴리스는 설치하지 않습니다." >&2; exit 1; } ;;
+esac
+OLD=$(cat "$DEST/.crossgate/kit/VERSION" 2>/dev/null || true)
+if [ "$DOWN" = 0 ] && [ -n "$OLD" ] && python3 - "$OLD" "$VERSION" <<'PY'
+import re, sys
+old, new = sys.argv[1:3]
+numeric = all(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", v) for v in (old, new))
+sys.exit(0 if numeric and tuple(map(int, new.split("."))) < tuple(map(int, old.split("."))) else 1)
+PY
+then
+  echo "설치된 버전($OLD)보다 낮은 버전($VERSION)입니다. 원본의 태그가 오래됐을 수 있습니다(원본에서 git fetch --tags). 그래도 낮추려면 --downgrade 를 붙이세요." >&2
+  exit 1
+fi
 
 # 0.1.x(옛 이름 ai-pipeline-kit)에서 올라오는 프로젝트: .pipeline → .crossgate 이전
 if [ -d "$DEST/.pipeline" ]; then

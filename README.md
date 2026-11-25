@@ -57,7 +57,7 @@ If you have several repositories under a root folder that is not itself a git re
 sh crossgate/install.sh --workspace /path/to/workspace
 ```
 
-This installs the engine and the `/crossgate` skill and leaves your workspace rules, `.gitignore` and CI alone. List each repository's `gate` and `protected` paths under `repos` in `config.json`, and pass `--repo` to `codex`, `gate` and `verdict`. Your workspace rules win where they say something. The skill covers what they leave open. See section 11 of [CROSSGATE.md](CROSSGATE.md).
+This installs the engine and the `/crossgate` skill and leaves your workspace rules, `.gitignore` and CI alone. List each repository's `gate` and `protected` paths under `repos` in `config.json`, and pass `--repo` to `codex`, `gate`, `verdict` and `probe`. A repository can also carry its own `probe` settings and `setup` command under `repos.<name>`. A key set there replaces the global one. See section 17 of [CROSSGATE.md](CROSSGATE.md). Your workspace rules win where they say something. The skill covers what they leave open. See section 11 of [CROSSGATE.md](CROSSGATE.md).
 
 ### Global setup skill
 

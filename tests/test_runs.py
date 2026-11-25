@@ -111,6 +111,16 @@ def test_rounds_and_caps_by_repository():
         status = P('status', repo).stdout
         assert 'dev [가]' in status and 'dev [나]' in status
         assert '검수 3/4' in status and '검수 4/4' in status
+        verdict('REJECTED', '가')
+        verdict('REJECTED', '가')
+        status = P('status', repo).stdout
+        # 상한을 넘겨도 기록은 되고, 넘긴 묶음은 status·resume·retro에 드러난다
+        assert '1회 초과' in status and '검수 상한을 넘긴 묶음 0건' not in P('retro', repo).stdout
+        assert '⚠' in P(f'resume --run {run}', repo).stdout
+        retro = P('retro', repo).stdout
+        assert '검수 상한을 넘긴 묶음 1건' in retro and 'dev [가] 5/4 (조정 요청 기록 없음)' in retro, retro
+        P('verdict --stage dev --verdict ESCALATED --repo 가 --note 조정', repo)
+        assert '조정 요청 기록 없음' not in P('retro', repo).stdout
     from cg import core
     records = [{'stage': 'dev', 'repo': name, 'verdict': 'REJECTED'} for name in ['가', '가', '나']]
     assert core.escalation(records, 'dev', 3, '가') is None

@@ -3,7 +3,7 @@ import json
 import re
 import shutil
 import sys
-from cg.core import DIRS, KIT, ROUTES, config, git, recent_activity, root
+from cg.core import DIRS, KIT, ROUTES, config, git, kit_version, recent_activity, root
 
 
 def cmd_init_run(a):
@@ -12,13 +12,15 @@ def cmd_init_run(a):
     day.mkdir(parents=True, exist_ok=True)
     n = len([d for d in day.iterdir() if d.is_dir()]) + 1
     slug = re.sub(r"[^\w-]+", "-", a.slug).strip("-")
+    if not slug:
+        sys.exit(f"실행 이름으로 쓸 글자가 없습니다: {a.slug!r} (글자·숫자·-·_ 를 쓴다).")
     run = day / f"{n:03d}_{now:%H%M%S}_{slug}"
     for d in DIRS:
         (run / d).mkdir(parents=True)
     shutil.copy(KIT / "templates" / "request.md", run / "00-request" / "request.md")
     meta = {"slug": slug, "route": "standard" if a.quick else a.route,
             "branch": git("rev-parse", "--abbrev-ref", "HEAD", check=False, cwd=r) or None, "created": now.isoformat(timespec="seconds"),
-            "kit": (KIT / "VERSION").read_text().strip() if (KIT / "VERSION").exists() else "?"}
+            "kit": kit_version()}
     (run / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     cur = r / ".crossgate" / "current-run"
     prev = r / cur.read_text().strip() if cur.exists() else None
